@@ -1,0 +1,42 @@
+[
+  {
+    "fold": 1,
+    "treino": 1891,
+    "teste": 1891,
+    "tempoTreinoSeg": "12.7",
+    "acc": 0.3363299841353781,
+    "baselineHits": 0.3532522474881015
+  },
+  {
+    "fold": 2,
+    "treino": 3782,
+    "teste": 1891,
+    "tempoTreinoSeg": "24.2",
+    "acc": 0.31887890005288205,
+    "baselineHits": 0.31940772078265467
+  },
+  {
+    "fold": 3,
+    "treino": 5673,
+    "teste": 1891,
+    "tempoTreinoSeg": "34.5",
+    "acc": 0.32152300370174514,
+    "baselineHits": 0.30988894764674774
+  },
+  {
+    "fold": 4,
+    "treino": 7564,
+    "teste": 1891,
+    "tempoTreinoSeg": "46.8",
+    "acc": 0.31517715494447385,
+    "baselineHits": 0.3273400317292438
+  },
+  {
+    "fold": 5,
+    "treino": 9455,
+    "teste": 1891,
+    "tempoTreinoSeg": "57.7",
+    "acc": 0.31094658910629297,
+    "baselineHits": 0.3204653622421999
+  }
+]
