@@ -51,10 +51,9 @@ button:hover{opacity:.85}
 .stack .matriz-container{grid-column:1;grid-row:1 / span 3}
 .stack .g-ming{grid-column:2;grid-row:1}
 .stack .g-trend{grid-column:3;grid-row:1}
-.stack .g-drift{grid-column:4;grid-row:1}
 .stack .g-sniper{grid-column:2 / span 2;grid-row:2}
 .stack .g-atraso{grid-column:2 / span 2;grid-row:3}
-.stack .g-lei{grid-column:4;grid-row:2}
+.stack .g-lei{grid-column:4;grid-row:1 / span 2}
 .stack .g-diag{grid-column:4;grid-row:3}
 .quadrante{display:flex;flex-direction:column}
 .matriz-container{background:var(--surface);border-radius:6px;padding:10px;border:1px solid var(--border);max-width:290px}
@@ -79,15 +78,11 @@ button:hover{opacity:.85}
 @keyframes ondaPulse{0%{box-shadow:0 0 0 0 rgba(201,169,97,0.5)}70%{box-shadow:0 0 0 8px rgba(201,169,97,0)}100%{box-shadow:0 0 0 0 rgba(201,169,97,0)}}
 .onda-ativa{background:rgba(201,169,97,0.12);border:1px solid var(--gold);color:var(--gold);animation:ondaPulse 1.8s infinite;padding:6px 8px;border-radius:6px;margin-bottom:5px;font-size:11px}
 /* [NOVO] Destaque para calls dos outros rastreadores - o Trend chama atenção naturalmente,
-   então Drift/Trigger/Diagonal ganham o mesmo pulso dourado quando emitem call */
+   então Trigger/Diagonal ganham o mesmo pulso dourado quando emitem call */
 .box-com-call{border-color:var(--gold) !important;animation:ondaPulse 1.8s infinite}
 .alert-inactive{background:var(--surface-2);border:1px solid var(--border);color:var(--muted)}
 .empty-msg{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:1.5px;text-align:center;padding:14px 5px}
-.drift-trigger{background:var(--surface-2);border:1px solid var(--jade);border-radius:4px;padding:7px;text-align:center;margin-bottom:6px}
-.drift-trigger .num{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--jade)}
-.drift-trigger .label{font-size:7px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-top:2px}
 .drift-result{background:var(--jade-dim);border:1px solid var(--jade);border-radius:4px;padding:6px;text-align:center;font-size:10px;font-weight:600;color:#a8e0d3;letter-spacing:.5px;margin-bottom:4px;font-family:var(--mono)}
-.drift-wait{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:1.5px;text-align:center;padding:18px 5px}
 .accuracy-box{background:var(--surface-2);border:1px solid var(--border);border-radius:3px;padding:6px;margin-top:7px;text-align:center;font-size:10px;font-family:var(--mono)}
 .accuracy-box strong{color:var(--jade);font-size:12px}
 
@@ -265,13 +260,6 @@ button:hover{opacity:.85}
 </div>
 </div>
 
-<!-- Successor Drift -->
-<div class="quadrante g-drift" id="boxDrift">
-<h3>Successor Drift</h3>
-<div id="driftContent"><div class="drift-wait">Aguardando padrão...</div></div>
-<div id="driftAccuracy" class="accuracy-box">Assertividade: <strong>0%</strong> (0/0)</div>
-</div>
-
 <!-- CONVERGÊNCIA -->
 <div class="sniper-section g-sniper" id="boxSniper" style="display:flex;gap:10px;flex-wrap:wrap">
 <div class="sniper-level" style="flex:1;min-width:200px">
@@ -354,8 +342,6 @@ let t123Predictions={total:0,acertos:0};
 let trendColPredictions={total:0,acertos:0};
 let trendDuzPredictions={total:0,acertos:0};
 // [NOVO] Rastreamento separado do modo "alinhado" (DZ+Col simultaneamente quentes)
-let driftPredictions={total:0,acertos:0};
-let driftNumeroPredictions={total:0,acertos:0};
 let sniperPredictions={total:0,acertos:0};
 
 let t123CallLog=[];
@@ -372,33 +358,10 @@ let lastOndasAtivas=[];
 // candidato venceu o torneio interno e sua taxa de acerto historica especifica.
 let trendCandidatoPredictions={};
 let trendCallLog=[];
-let driftCallLog=[];
-let driftNumeroCallLog=[];
 let sniperCallLog=[];
 
 let lastT123Signal=null;
 let lastTrendSignal=null;
-let lastDriftSignal=null;
-
-// [NOVO] CUSUM para o Drift-Cor - detecta o MOMENTO em que uma fase fraca do padrão termina,
-// nao um "clima geral da mesa". Validado nos dados reais: apos o alerta disparar, a
-// assertividade tende a voltar pro baseline (44%->49%, 43%->47%, 39%->49% em 3 limiares
-// testados). NAO mostrou o mesmo efeito no Trend - por isso, so aplicado aqui por enquanto.
-let cusumDriftS = 0;
-let cusumDriftAlertaAtivo = false;
-let cusumDriftUltimoAlerta = null; // giro em que o ultimo alerta disparou, para exibir por um tempo
-const CUSUM_K = 0.10;
-const CUSUM_H = 1.5;
-
-// [NOVO] Limitador: a partir desse nivel (fracao de CUSUM_H), a call do Drift-Cor fica
-// INIBIDA - nao conta mais pro Sniper nem aparece como call ativa - mas continua sendo
-// registrada separadamente (driftPredictionsInibido) para comparar depois se a inibicao
-// de fato filtra os periodos ruins. Nada disso afeta driftPredictions/driftCallLog originais,
-// que continuam medindo a assertividade BRUTA do motor, sem filtro.
-const CUSUM_LIMIAR_INIBICAO = 0.70 * CUSUM_H;
-let driftPredictionsAtivo = {total:0, acertos:0};
-let driftPredictionsInibido = {total:0, acertos:0};
-let driftCallLogInibido = [];
 
 // [NOVO] Estado da Diagonal - Intermitencia/Ciclo (vira call ativa, informativa)
 let diagIntermPredictions = {total:0, acertos:0};
@@ -407,7 +370,6 @@ let lastDiagIntermSignal = null;
 // [NOVO] Assertividade das "tips" da diagonal (dominancia de dz/col/terminal/cor/paridade/altoBaixo)
 let diagonalPredictions = {total:0, acertos:0};
 let lastDiagonalSignal = null;
-let lastDriftNumeroSignal=null;
 let lastSniperSet=[];
 let girosDesdeUltimaAnalise=0;
 // [NOVO] Contador monotônico de giros processados - usado pra mostrar "há quantos giros" desde
@@ -423,7 +385,7 @@ let totalGirosProcessados=0;
 //
 // Modo agressivo: Dúzia E Coluna dispararam juntas nesse giro (dupla confirmação do Trend)
 // Modo moderado: só uma das duas disparou, sem sinais de alerta
-// Modo conservador: CUSUM do Drift-Cor elevado (fase ruim) OU Trend acumulado abaixo de 55%
+// Modo conservador: Trend acumulado abaixo de 55%, ou alternância muito alta na janela recente
 // Sem sinal: Trend não disparou nada - não aposta
 // ============================================================================
 // [CORRIGIDO - BUG GRAVE] GESTAO_PAYOUT estava em 2 (como se fosse aposta numa dúzia só,
@@ -467,7 +429,6 @@ function gestaoCalcularAposta(modo){
 
 function gestaoModoEAposta(trend){
     if(!bancaConfig.ativo || !trend) return null;
-    const cusumAlto = cusumDriftS >= CUSUM_LIMIAR_INIBICAO;
 
     // [CORRIGIDO] Limiar fixo de 55% trocado por comparação ao baseline real (64.9% - margem).
     // Antes: Dúzia a 55.2% (praticamente no próprio limiar de "fraco") passava batido porque
@@ -498,7 +459,7 @@ function gestaoModoEAposta(trend){
 
     function modoPara(disparou, fraco){
         if(!disparou) return null;
-        if(fraco || cusumAlto || altissimaAlternancia) return 'conservador';
+        if(fraco || altissimaAlternancia) return 'conservador';
         if(duplo) return 'agressivo';
         return 'moderado';
     }
@@ -614,9 +575,9 @@ function resetarGestaoBanca(){
 
 // Calibração (preenchida por Monte Carlo em inicializarCalibracao)
 let calib={
-    limiarMing:0, limiarTrend:0, limiarDriftNumero:{},
-    mingBaselinePct:0, duzColBaselinePct:0, driftBaselinePct:0,
-    driftNumeroBaselinePct:0, trendBaselinePct:0,
+    limiarMing:0, limiarTrend:0,
+    mingBaselinePct:0, duzColBaselinePct:0,
+    trendBaselinePct:0,
     alphaBaselinePct:0, betaBaselinePct:0,
     limiarDiagonalDuzCol:0, limiarDiagonalTerminal:0, limiarIntermitencia:{}
 };
@@ -969,20 +930,6 @@ function bhSignificativos(pvalues, q){
     }
     if(maiorRank===-1) return [];
     return ordenado.slice(0,maiorRank).map(o=>o.idx);
-}
-
-// Nivel de FDR usado no Successor Drift (Terminal+Vizinhos). 0.20 é deliberadamente mais
-// permissivo que o 0.05/0.10 "de livro-texto": a prioridade aqui, a pedido do usuario, é manter
-// o motor gerando calls com frequencia util, aceitando uma taxa de falso-positivo um pouco maior
-// em troca disso — mas ainda MUITO mais rigoroso estatisticamente que nao ter correcao nenhuma.
-const FDR_Q_DRIFT_NUMERO = 0.20;
-
-// [NOVO] Baseline real do Terminal+Vizinhos: media do TAMANHO do conjunto coberto
-// (T0-T6 cobrem 12 numeros, T7-T9 cobrem 9 numeros — nao é 1 numero como no motor antigo)
-function calcularBaselineTerminalVizinhos(){
-    let total=0;
-    for(let t=0;t<10;t++){ total += conjuntoTerminalVizinhos(t).length; }
-    return (total/10)/37*100;
 }
 
 function baselineTrendCoverage(){
@@ -1780,10 +1727,6 @@ function inicializarCalibracao(){
     calib.limiarTrend = 5;
     calib.mingBaselinePct = (37/10)/37*100;
     calib.duzColBaselinePct = 24/37*100;
-    calib.driftBaselinePct = 18/37*100;
-    // limiarDriftNumero removido: o teste do numero exato agora e analitico (binomial+FDR),
-    // nao precisa mais de calibracao Monte Carlo previa.
-    calib.driftNumeroBaselinePct = calcularBaselineTerminalVizinhos();
     calib.trendBaselinePct = baselineTrendCoverage();
     calib.limiarDiagonalDuzCol = calibrarDiagonalDuzCol(6000);
     calib.limiarDiagonalTerminal = calibrarDiagonalTerminal(6000);
@@ -1965,7 +1908,7 @@ function treinarPassoEstrutural(modelo, x, yReal, taxaAprendizado){
 }
 
 // --- Extração de features (reforço estrutural corrigido, sem mistura DZ/Col x Cor) ---
-function extrairFeaturesEstrutural(hist, terminal, sTrend, sDrift){
+function extrairFeaturesEstrutural(hist, terminal, sTrend){
     const r = REFORCO_ESTRUTURAL[terminal];
     // [ALTERADO] Terminais 0,7,8,9 trocaram de Cor pra Alto/Baixo como reforço - decisão do
     // usuário (Cor não é confiável o suficiente pra ele). Usa frequência numa janela de 40
@@ -1992,9 +1935,9 @@ function extrairFeaturesEstrutural(hist, terminal, sTrend, sDrift){
     return [ehGrupoEspecial, concordancia, ewmaLigado, atrasoLigado];
 }
 
-function preverModeloEstrutural(terminal, hist, sTrend, sDrift){
+function preverModeloEstrutural(terminal, hist, sTrend){
     if(!modeloEstrutural) return 0.33; // sem modelo treinado ainda, retorna neutro
-    const x = extrairFeaturesEstrutural(hist, terminal, sTrend, sDrift);
+    const x = extrairFeaturesEstrutural(hist, terminal, sTrend);
     return forwardEstrutural(modeloEstrutural, x).saida;
 }
 
@@ -2015,7 +1958,7 @@ function retreinarModeloEstrutural(callbackProgresso){
     }
     const seq = historicoArquivoPermanente.map(x=>x.n);
 
-    // roda o motor sobre TODA a sequencia pra gerar sTrend/sDrift historicos e montar exemplos
+    // roda o motor sobre TODA a sequencia pra gerar sTrend historicos e montar exemplos
     // (salva o estado ATUAL antes de mexer, restaura no final - nao perde a sessao ao vivo)
     const estadoAntes = coletarEstado();
     resetarTudo();
@@ -2030,13 +1973,12 @@ function retreinarModeloEstrutural(callbackProgresso){
         totalGirosProcessados++;
         atualizarTerminalRadar(novo);
         const sT = analisarTrend();
-        const sD = analisarDrift();
 
         if(totalGirosProcessados<100) continue;
         if(i+HORIZONTE >= seq.length) continue;
 
         for(let t=0;t<=9;t++){
-            const feat = extrairFeaturesEstrutural(historicoTotal, t, sT, sD);
+            const feat = extrairFeaturesEstrutural(historicoTotal, t, sT);
             const futuro = seq.slice(i+1, i+1+HORIZONTE);
             const hits = futuro.filter(x=>terminalDig(x)===t).length;
             const baseline = (t===0||t===7||t===8||t===9) ? 3/37 : 4/37;
@@ -2190,8 +2132,8 @@ function atualizarTerminalRadar(novoNumero){
     }
 }
 
-// Verifica se o reforço estrutural do terminal bate com o que Trend/Drift estão indicando AGORA
-function verificarReforcoEstrutural(t, sTrend, sDrift){
+// Verifica se o reforço estrutural do terminal bate com o que o Trend está indicando AGORA
+function verificarReforcoEstrutural(t, sTrend){
     const r = REFORCO_ESTRUTURAL[t];
     if(!r) return null;
     if(r.dz!==undefined){
@@ -2227,12 +2169,12 @@ function taxaJanelaRapida(log, tam){
     return recentes.filter(c=>c.acerto).length/recentes.length;
 }
 
-function rodarTorneioTerminal(sTrend, sDrift){
+function rodarTorneioTerminal(sTrend){
     // monta os 3 candidatos com seus respectivos: pacote de numeros/terminais, log, baseline
     const top4EWMA = Object.keys(ewmaTerminais).map(t=>({t:parseInt(t), ewma:ewmaTerminais[t]})).sort((a,b)=>b.ewma-a.ewma).slice(0,4).map(x=>x.t);
     const rankingML = historicoTotal.length>=7 ? preverModeloTerminal(historicoTotal) : [];
     const top3ML = rankingML.slice(0,3).map(r=>r.t);
-    const rankingEstrutural = modeloEstrutural ? [0,1,2,3,4,5,6,7,8,9].map(t=>({t, prob:preverModeloEstrutural(t, historicoTotal, sTrend, sDrift)})).sort((a,b)=>b.prob-a.prob) : [];
+    const rankingEstrutural = modeloEstrutural ? [0,1,2,3,4,5,6,7,8,9].map(t=>({t, prob:preverModeloEstrutural(t, historicoTotal, sTrend)})).sort((a,b)=>b.prob-a.prob) : [];
     const top3Estrutural = rankingEstrutural.slice(0,3).map(r=>r.t);
 
     const candidatos = [
@@ -2275,9 +2217,9 @@ function rodarTorneioTerminal(sTrend, sDrift){
     return {vencedor:melhor.nome, pacote:melhor.pacote, ativos:aprovados.map(c=>c.nome), indicador};
 }
 
-function atualizarEVerificarTorneio(novoNumero, sTrend, sDrift){
+function atualizarEVerificarTorneio(novoNumero, sTrend){
     // roda o torneio com o estado ANTES desse giro, depois confere contra o real
-    const resultado = rodarTorneioTerminal(sTrend, sDrift);
+    const resultado = rodarTorneioTerminal(sTrend);
     if(resultado.vencedor){
         const tReal = terminalDig(novoNumero);
         const hit = resultado.pacote.includes(tReal);
@@ -2305,7 +2247,7 @@ function maiorSequenciaR(log){
     return maior;
 }
 
-function renderTerminalRadar(sTrend, sDrift){
+function renderTerminalRadar(sTrend){
     const div = document.getElementById('terminalRadarContent');
     if(!div) return;
     if(totalGirosProcessados < 60){
@@ -2315,7 +2257,7 @@ function renderTerminalRadar(sTrend, sDrift){
 
     // [NOVO] TORNEIO - call oficial, no topo, com sequencia G/R (mais importante que %)
     let html = '';
-    const resultadoTorneio = rodarTorneioTerminal(sTrend, sDrift);
+    const resultadoTorneio = rodarTorneioTerminal(sTrend);
     html += `<div style="padding:6px;background:rgba(201,169,97,0.08);border:1px solid var(--gold);border-radius:4px;margin-bottom:8px">`;
     html += `<div style="font-size:9px;color:var(--gold);font-weight:600;margin-bottom:3px">🏆 CALL DO TORNEIO</div>`;
     if(resultadoTorneio.vencedor){
@@ -2339,7 +2281,7 @@ function renderTerminalRadar(sTrend, sDrift){
     html += '<div style="font-size:9px;color:var(--muted);margin-bottom:5px">EWMA por terminal (mais quente primeiro)</div>';
     ranking.slice(0,4).forEach(r=>{
         const quente = terminaisQuentes[r.t]!==undefined && (totalGirosProcessados - terminaisQuentes[r.t]) <= 15;
-        const reforco = quente ? verificarReforcoEstrutural(r.t, sTrend, sDrift) : null;
+        const reforco = quente ? verificarReforcoEstrutural(r.t, sTrend) : null;
         const corTxt = r.ewma > 0.15 ? 'var(--gold)' : 'var(--muted)';
         html += `<div class="stat-row"><span class="stat-label">T${r.t}${quente?' 🔥':''}</span><span class="stat-value" style="color:${corTxt}">${(r.ewma*100).toFixed(1)}%${reforco?` <span style="color:var(--jade)" title="Reforço estrutural confirmado">✓${reforco}</span>`:''}</span></div>`;
     });
@@ -2365,7 +2307,7 @@ function renderTerminalRadar(sTrend, sDrift){
 
     // [NOVO] Call do Reforço Estrutural - 3º candidato do torneio
     if(modeloEstrutural){
-        const rankingEstrut = [0,1,2,3,4,5,6,7,8,9].map(t=>({t, prob:preverModeloEstrutural(t, historicoTotal, sTrend, sDrift)})).sort((a,b)=>b.prob-a.prob);
+        const rankingEstrut = [0,1,2,3,4,5,6,7,8,9].map(t=>({t, prob:preverModeloEstrutural(t, historicoTotal, sTrend)})).sort((a,b)=>b.prob-a.prob);
         const top3Estrut = rankingEstrut.slice(0,3);
         html += `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">`;
         html += `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">🧬 Call Estrutural (auto-aprendizagem)</div>`;
@@ -2845,42 +2787,16 @@ function analisarTrend(){
     return {parDuz:vencedor.parDuz, parCol:vencedor.parCol, candidato:vencedor.nome, confianca:vencedor.confianca, _janelaB: vencedor._janelaVencedora};
 }
 
-// [ATUALIZADO] A lente de número exato agora vira Terminal + 2 vizinhos de roleta
-// [SUBSTITUÍDO] Mecanismo antigo (gatilho=último número, olha 8 sucessores DESSE número)
-// testado exaustivamente contra 6 critérios diferentes (Cor, Alto/Baixo, Setor, Terminal,
-// Dúzia, Coluna) - nenhum mostrou sinal real nas amostras grandes, sempre regredia ao baseline.
-// Trocado pelo mesmo mecanismo que já funciona no Candidato G (Frequência de Base): janela
-// curta contínua, sem depender de um gatilho específico. Testado antes de trocar: 5 de 6
-// sessões vieram acima do baseline (48,6%), incluindo as duas maiores amostras (S4.1 n=72:
-// 56,9%, S5 n=107: 55,1%) - ainda sem significância individual forte, mas primeira vez que o
-// Drift mostrou consistência em amostra grande em vez de regredir. Fica em observação, com o
-// corta-circuito e o CUSUM de inibição já existentes continuando a proteger o lado de risco.
-const DRIFT_JANELA_FREQ = 40;
-const DRIFT_LIMIAR_FREQ = 0.60;
-
-function analisarDrift(){
-if(historicoTotal.length<DRIFT_JANELA_FREQ+10)return null;
-const janela = historicoTotal.slice(0, DRIFT_JANELA_FREQ).map(getCor).filter(c=>c!=='green');
-if(janela.length<25) return null;
-const redPct = janela.filter(c=>c==='red').length/janela.length;
-const blackPct = janela.filter(c=>c==='black').length/janela.length;
-
-let sinalCor=null;
-if(redPct>=DRIFT_LIMIAR_FREQ) sinalCor={valor:'red',perc:Math.round(redPct*100)};
-else if(blackPct>=DRIFT_LIMIAR_FREQ) sinalCor={valor:'black',perc:Math.round(blackPct*100)};
-
-if(!sinalCor) return null;
-return {gatilho:historicoTotal[0], cor:sinalCor, numero:null};
-}
-
 // [REMOVIDO] analisarPuxada (Léi) - removido, sem edge validado.
+// [REMOVIDO] analisarDrift (Drift-Cor) - matado por decisão do usuário após testes exaustivos
+// confirmarem ausência de edge (50.5% real vs 48.6% baseline, ver BRIEFING_PROJETO.md).
 
 // --- MONITOR DE TENDÊNCIA [RECALIBRADO] ---
 // Mudanca de design, a pedido do usuario, apos testarmos autocorrelacao nos dados historicos:
 // - Janela reduzida de 30 para 15 giros (a antiga diluia qualquer sinal recente)
 // - T123 excluido do calculo: poucas amostras + performance abaixo do baseline, so acrescentava ruido
-// - Peso concentrado no Trend (0.7), que é o unico motor com edge estatistico validado (68,9% vs
-//   baseline 64,9% em >500 giros); Drift entra com peso menor (0.3) como sinal secundario
+// - Baseado 100% no Trend, o unico motor com edge estatistico validado (68,9% vs baseline
+//   64,9% em >500 giros) - Drift-Cor foi removido do calculo apos confirmado sem edge
 // AVISO HONESTO: nos testes de autocorrelacao que fizemos nos 660 giros disponiveis, essa
 // configuracao (e outras testadas) NAO mostrou evidencia estatistica robusta de que exista uma
 // "fase" que realmente persiste - os poucos resultados "significativos" tinham amostra muito
@@ -2896,38 +2812,24 @@ function calcularPerformanceReal(callLogArray, windowSize){
 
 const TERMOMETRO_JANELA = 15;
 const TERMOMETRO_CADENCIA = 5; // atualiza a cada 5 giros (era 10, reduzido proporcionalmente a janela)
-const TERMOMETRO_PESO_TREND = 0.7;
-const TERMOMETRO_PESO_DRIFT = 0.3;
-
 function atualizarMonitorTendencia(){
 if(historicoTotal.length < 40) return;
 
 const perfTrend = calcularPerformanceReal(trendCallLog, TERMOMETRO_JANELA);
-const perfDrift = calcularPerformanceReal(driftCallLog, TERMOMETRO_JANELA);
 
 const dot = document.getElementById('statusDot');
 const txt = document.getElementById('statusText');
 const trendTxt = document.getElementById('trendText');
 
-if(perfTrend===null && perfDrift===null){
+if(perfTrend===null){
     dot.className='status-dot bg-sta';
     txt.textContent='SEM CALLS AINDA';
     trendTxt.textContent='--';
     return;
 }
 
-// composto ponderado: se um dos dois ainda nao tem amostra, usa 100% do outro
-let mediaGeral, baselineMedia;
-if(perfTrend!==null && perfDrift!==null){
-    mediaGeral = TERMOMETRO_PESO_TREND*perfTrend + TERMOMETRO_PESO_DRIFT*perfDrift;
-    baselineMedia = TERMOMETRO_PESO_TREND*calib.duzColBaselinePct + TERMOMETRO_PESO_DRIFT*calib.driftBaselinePct;
-}else if(perfTrend!==null){
-    mediaGeral = perfTrend;
-    baselineMedia = calib.duzColBaselinePct;
-}else{
-    mediaGeral = perfDrift;
-    baselineMedia = calib.driftBaselinePct;
-}
+const mediaGeral = perfTrend;
+const baselineMedia = calib.duzColBaselinePct;
 const diff = mediaGeral - baselineMedia;
 
 dot.className = 'status-dot';
@@ -2972,7 +2874,7 @@ function doisGreensSeguidosTMing(){
     return ultimas[0].acerto===true && ultimas[1].acerto===true;
 }
 
-function executarSniperUnico(sTrend, sDrift, sTrigger){
+function executarSniperUnico(sTrend, sTrigger){
     // [SUBSTITUÍDO] Sniper trocou de "2 de 3 categorias convergindo" pra "3 EWMA alinhados
     // acima de 70%" (Coluna, Dúzia e Terminal) - decisão do usuário, usa a mesma qualidade
     // contínua que já mostramos no painel, em vez de convergência mecânica de categoria.
@@ -3090,14 +2992,6 @@ function aplicarFiltroContradicao(par, fn, contadorFn){
     return {par:[manter, dom].sort((a,b)=>a-b), invertido:true, dominante:dom};
 }
 
-// [NOVO] Corta-circuito por sequência - Drift-Cor. Mesmo princípio do Trend: não tenta prever
-// melhor (já provamos que EWMA bloquear na fase ruim PIORA o resultado - cor é memoryless de
-// verdade, sem momentum pra detectar). Só limita o tamanho do dano: depois de 3 erros seguidos,
-// pausa novas calls por 5 giros.
-const DRIFT_STREAK_LIMIAR = 3;
-const DRIFT_STREAK_COOLDOWN = 5;
-let driftStreakErro = 0;
-let driftPausaAte = 0;
 let persistenciaParDZ = {par:null, giros:0};
 let persistenciaParCol = {par:null, giros:0};
 
@@ -3118,8 +3012,6 @@ if(sTrend){
         if(r.invertido) sTrend = {...sTrend, parCol:r.par, _invertidoCol:r.dominante};
     }
 }
-let sDrift=analisarDrift();
-if(sDrift && totalGirosProcessados < driftPausaAte) sDrift = {...sDrift, _pausadoDrift:true};
 const sDiagonal=analisarDiagonal();
 const sInterm=analisarDiagonalIntermitencia(sDiagonal);
 const sChave=chaveNumeroAtivoAgora();
@@ -3145,7 +3037,7 @@ if(historicoTotal.length>0) atualizarTerminalRadar(historicoTotal[0]);
 if(historicoTotal.length>0 && modeloEstrutural){
     const histAntesEstrut = historicoTotal.slice(1);
     if(histAntesEstrut.length>=1){
-        const rankingEstrutAntes = [0,1,2,3,4,5,6,7,8,9].map(t=>({t, prob:preverModeloEstrutural(t, histAntesEstrut, sTrend, sDrift)})).sort((a,b)=>b.prob-a.prob);
+        const rankingEstrutAntes = [0,1,2,3,4,5,6,7,8,9].map(t=>({t, prob:preverModeloEstrutural(t, histAntesEstrut, sTrend)})).sort((a,b)=>b.prob-a.prob);
         const top3EstrutAntes = rankingEstrutAntes.slice(0,3).map(r=>r.t);
         const tRealEstrut = terminalDig(historicoTotal[0]);
         const hitEstrut = top3EstrutAntes.includes(tRealEstrut);
@@ -3159,17 +3051,17 @@ if(historicoTotal.length>0 && modeloEstrutural){
 // [NOVO] Torneio - roda e verifica a call OFICIAL (combinacao dos 3 candidatos)
 let ultimoResultadoTorneio = null;
 if(historicoTotal.length>0){
-    ultimoResultadoTorneio = atualizarEVerificarTorneio(historicoTotal[0], sTrend, sDrift);
+    ultimoResultadoTorneio = atualizarEVerificarTorneio(historicoTotal[0], sTrend);
 }
 
-renderTerminalRadar(sTrend, sDrift);
+renderTerminalRadar(sTrend);
 
-atualizarUIIndividual(sTrend, sDrift, sDiagonal, sChave, sLuoShu, luoShuConverge);
+atualizarUIIndividual(sTrend, sDiagonal, sChave, sLuoShu, luoShuConverge);
 atualizarUIDiagonal(sDiagonal, sInterm);
 lastDiagonalSignal = sDiagonal;
 lastDiagIntermSignal = sInterm;
 
-const sniper = executarSniperUnico(sTrend, sDrift, sTrigger);
+const sniper = executarSniperUnico(sTrend, sTrigger);
 atualizarPainelOndas();
 renderSniperUnico(sniper);
 lastSniperSet = sniper.numeros;
@@ -3177,14 +3069,13 @@ atualizarSniperTitle();
 atualizarHistoricoQuebra();
 
 // [NOVO] Destaque visual nos boxes dos outros rastreadores quando emitem call - evita que
-// as calls do Drift/Trigger/Diagonal passem despercebidas porque o Trend rouba a atenção.
+// as calls do Trigger/Diagonal passem despercebidas porque o Trend rouba a atenção.
 (function(){
     const marcar = (id, temCall)=>{
         const el = document.getElementById(id);
         if(!el) return;
         if(temCall) el.classList.add('box-com-call'); else el.classList.remove('box-com-call');
     };
-    marcar('boxDrift', !!(sDrift && sDrift.cor));
     marcar('boxTrigger', !!sTrigger);
     marcar('boxDiagonal', !!(sInterm && sInterm.previsto));
     // [NOVO] Faltavam esses 3 - existiam desde antes mas nunca tinham ID, então o destaque
@@ -3293,7 +3184,7 @@ function TRADUCAO_INTERMITENCIA_LABEL(cat){
 return {cor:'Cor', paridade:'Paridade', altoBaixo:'Alto/Baixo', duzia:'Dúzia'}[cat] || cat;
 }
 
-function atualizarUIIndividual(trend, drift, diagonal, chave, luoShu, luoShuConverge){
+function atualizarUIIndividual(trend, diagonal, chave, luoShu, luoShuConverge){
 // [REMOVIDO] T Míng e Anti-Míng aposentados (sem edge validado, sempre no ou abaixo do
 // baseline - 23-32% real medido). ids t123Stats/t123Alert/t123Accuracy/antiMing* ficam
 // órfãos no HTML por enquanto (não removidos do markup pra não quebrar mais nada agora).
@@ -3391,48 +3282,6 @@ trendDiv.innerHTML='<div class="empty-msg">Fluxo equilibrado</div>';
 trendAlerts.innerHTML='';
 lastTrendSignal=null;
 atualizarUIGestao();
-}
-
-// Drift UI [ATUALIZADO] exibe cor e/ou Terminal+Vizinhos
-const driftDiv=document.getElementById('driftContent');
-
-// [NOVO] Linha do CUSUM - mostra o nivel acumulado e o alerta de "fim de fase fraca"
-function linhaCusum(){
-if(driftPredictions.total<5) return '';
-const nivel = Math.min(100, Math.round(cusumDriftS/CUSUM_H*100));
-let html = `<div class="accuracy-box" style="margin-top:6px">CUSUM: <strong>${nivel}%</strong> do limiar`;
-if(cusumDriftAlertaAtivo){
-html += ` <span style="color:#3a9683">🔔 Fim de fase fraca detectado!</span>`;
-}
-html += `</div>`;
-return html;
-}
-
-if(drift && (drift.cor || drift.numero)){
-let html=`<div class="drift-trigger"><div class="num">${drift.gatilho}</div><div class="label">Gatilho</div></div>`;
-if(drift.cor){
-const label=drift.cor.valor==='red'?'Vermelho':'Preto';
-const discordaCor = diagonalDiscordaSimples(diagonal, 'cor', drift.cor.valor);
-const inibida = cusumDriftS>=CUSUM_LIMIAR_INIBICAO || totalGirosProcessados < driftPausaAte;
-if(inibida){
-const motivoTxt = (totalGirosProcessados < driftPausaAte) ? `⏸ pausado (${DRIFT_STREAK_LIMIAR} erros seguidos) - retoma em ${driftPausaAte-totalGirosProcessados} giro(s)` : 'inibida';
-html+=`<div class="drift-result" style="background:#2a2a2e;border-color:#666;color:#999">🔇 Cor: ${label} (${drift.cor.perc}%) — ${motivoTxt}</div>`;
-}else{
-html+=`<div class="drift-result">Cor: ${label} (${drift.cor.perc}%)${discordaCor?AVISO_DIAGONAL:''}</div>`;
-}
-}
-if(drift.numero){
-const discordaNum = diagonalDiscordaSimples(diagonal, 'terminal', drift.numero.valor);
-html+=`<div class="drift-result">Terminal+Vz: T${drift.numero.valor} (${drift.numero.perc}%)${discordaNum?AVISO_DIAGONAL:''}</div>`;
-}
-html += linhaCusum();
-driftDiv.innerHTML=html;
-lastDriftSignal = drift.cor ? {...drift.cor, gatilho:drift.gatilho, inibido: (cusumDriftS>=CUSUM_LIMIAR_INIBICAO || totalGirosProcessados < driftPausaAte)} : null;
-lastDriftNumeroSignal = drift.numero ? {...drift.numero, gatilho:drift.gatilho} : null;
-}else{
-driftDiv.innerHTML='<div class="drift-wait">Sem rastro definido</div>' + linhaCusum();
-lastDriftSignal=null;
-lastDriftNumeroSignal=null;
 }
 }
 
@@ -3558,47 +3407,6 @@ if(hit!==null) gestaoResolverAposta(g.modo, g.stake, hit, label, anterior, novo)
 }
 }
 
-if(lastDriftSignal){
-const hit = getCor(novo)===lastDriftSignal.valor;
-// registro BRUTO (sempre, sem filtro - mede a assertividade real do motor)
-driftPredictions.total++; if(hit) driftPredictions.acertos++;
-driftCallLog.push({de:anterior,para:novo,call:(lastDriftSignal.valor==='red'?'VERMELHO':'PRETO')+' (nr '+lastDriftSignal.gatilho+')',acerto:hit});
-
-// [NOVO] Corta-circuito por sequência - conta erros seguidos no fluxo real (independente de
-// já estar pausado ou não), aciona pausa se bater o limiar. Mesma lógica do Trend.
-if(hit){ driftStreakErro=0; }
-else{
-    driftStreakErro++;
-    if(driftStreakErro>=DRIFT_STREAK_LIMIAR){
-        driftPausaAte = totalGirosProcessados + DRIFT_STREAK_COOLDOWN;
-        driftStreakErro = 0;
-    }
-}
-
-// [NOVO] registro SEPARADO ativo vs inibido, para comparar depois se o limitador filtra bem
-if(lastDriftSignal.inibido){
-driftPredictionsInibido.total++; if(hit) driftPredictionsInibido.acertos++;
-driftCallLogInibido.push({de:anterior,para:novo,call:(lastDriftSignal.valor==='red'?'VERMELHO':'PRETO')+' (nr '+lastDriftSignal.gatilho+') [INIBIDO]',acerto:hit});
-}else{
-driftPredictionsAtivo.total++; if(hit) driftPredictionsAtivo.acertos++;
-}
-
-// Atualiza o CUSUM (deteccao de fim de fase fraca)
-const p0Drift = calib.driftBaselinePct/100;
-cusumDriftS = Math.max(0, cusumDriftS + (p0Drift - CUSUM_K) - (hit?1:0));
-cusumDriftAlertaAtivo = false;
-if(cusumDriftS > CUSUM_H){
-cusumDriftAlertaAtivo = true;
-cusumDriftUltimoAlerta = driftPredictions.total;
-cusumDriftS = 0;
-}
-}
-
-if(lastDriftNumeroSignal){
-const hit = lastDriftNumeroSignal.nums.includes(novo);
-driftNumeroPredictions.total++; if(hit) driftNumeroPredictions.acertos++;
-driftNumeroCallLog.push({de:anterior,para:novo,call:'T'+lastDriftNumeroSignal.valor+'+Vz (gat '+lastDriftNumeroSignal.gatilho+')',acerto:hit});
-}
 
 if(lastSniperSet && lastSniperSet.length>0){
 const hit = lastSniperSet.includes(novo);
@@ -3744,7 +3552,6 @@ function cortarTrendInicial(){
 function aplicarJanelaInicial(){
     t123CallLog = cortarUltimos10ERecalcular(t123CallLog, t123Predictions);
     cortarTrendInicial();
-    driftCallLog = cortarUltimos10ERecalcular(driftCallLog, driftPredictions, 37); // [ATUALIZADO] mesmo corte do Trend (37), a pedido do usuário - CUSUM não é afetado
     sniperCallLog = cortarUltimos10ERecalcular(sniperCallLog, sniperPredictions);
     chavePromissoraCallLog = cortarUltimos10ERecalcular(chavePromissoraCallLog, chavePromissoraPredictions);
     diagIntermCallLog = cortarUltimos10ERecalcular(diagIntermCallLog, diagIntermPredictions);
@@ -3806,21 +3613,18 @@ function exportarArquivoPermanente(){
 function coletarEstado(){
     return {
         historicoTotal, t123Predictions, trendColPredictions, trendDuzPredictions,
-        driftPredictions, driftNumeroPredictions, sniperPredictions,
-        driftPredictionsAtivo, driftPredictionsInibido, driftCallLogInibido,
+        sniperPredictions,
         diagIntermPredictions, diagIntermCallLog,
         diagonalPredictions, chavePromissoraPredictions, chavePromissoraCallLog,
-        t123CallLog, trendCallLog, driftCallLog, driftNumeroCallLog, sniperCallLog,
+        t123CallLog, trendCallLog, sniperCallLog,
         antiMingPredictions, antiMingCallLog,
         ondasHistorico,
         trendCandidatoPredictions,
         quebraLog, quebrasPendentes,
-        cusumDriftS, cusumDriftAlertaAtivo, cusumDriftUltimoAlerta,
         lsPairErrorWindow, lsCallLog,
         girosDesdeUltimaAnalise, totalGirosProcessados, bancaConfig,
         paridadeLagState, paridadePredictions, paridadeCallLog, candidatoE4State, candidatoF29State, trendBTrackRecord, chaveCusumFrio, chaveMotorAtivo,
         trendStreakErro, trendPausaAte, ultimaQuebraPorTipo,
-        driftStreakErro, driftPausaAte,
         persistenciaParDZ, persistenciaParCol,
         transicaoAtual,
         ewmaTerminais, cusumTerminais, terminaisQuentes,
@@ -3844,12 +3648,7 @@ function aplicarEstado(s){
         t123Predictions = s.t123Predictions || {total:0,acertos:0};
         trendColPredictions = s.trendColPredictions || {total:0,acertos:0};
         trendDuzPredictions = s.trendDuzPredictions || {total:0,acertos:0};
-        driftPredictions = s.driftPredictions || {total:0,acertos:0};
-        driftNumeroPredictions = s.driftNumeroPredictions || {total:0,acertos:0};
         sniperPredictions = s.sniperPredictions || {total:0,acertos:0};
-        driftPredictionsAtivo = s.driftPredictionsAtivo || {total:0,acertos:0};
-        driftPredictionsInibido = s.driftPredictionsInibido || {total:0,acertos:0};
-        driftCallLogInibido = s.driftCallLogInibido || [];
         diagIntermPredictions = s.diagIntermPredictions || {total:0,acertos:0};
         diagIntermCallLog = s.diagIntermCallLog || [];
         diagonalPredictions = s.diagonalPredictions || {total:0,acertos:0};
@@ -3857,8 +3656,6 @@ function aplicarEstado(s){
         chavePromissoraCallLog = s.chavePromissoraCallLog || [];
         t123CallLog = s.t123CallLog || [];
         trendCallLog = s.trendCallLog || [];
-        driftCallLog = s.driftCallLog || [];
-        driftNumeroCallLog = s.driftNumeroCallLog || [];
         sniperCallLog = s.sniperCallLog || [];
         antiMingPredictions = s.antiMingPredictions || {total:0,acertos:0};
         antiMingCallLog = s.antiMingCallLog || [];
@@ -3866,9 +3663,6 @@ function aplicarEstado(s){
         trendCandidatoPredictions = s.trendCandidatoPredictions || {};
         quebraLog = s.quebraLog || [];
         quebrasPendentes = s.quebrasPendentes || [];
-        cusumDriftS = s.cusumDriftS || 0;
-        cusumDriftAlertaAtivo = s.cusumDriftAlertaAtivo || false;
-        cusumDriftUltimoAlerta = s.cusumDriftUltimoAlerta || null;
         lsPairErrorWindow = s.lsPairErrorWindow || {};
         lsCallLog = s.lsCallLog || [];
         girosDesdeUltimaAnalise = s.girosDesdeUltimaAnalise || 0;
@@ -3885,8 +3679,6 @@ function aplicarEstado(s){
         trendStreakErro = s.trendStreakErro || {DZ:0, Col:0};
         trendPausaAte = s.trendPausaAte || {DZ:0, Col:0};
         ultimaQuebraPorTipo = s.ultimaQuebraPorTipo || {};
-        driftStreakErro = s.driftStreakErro || 0;
-        driftPausaAte = s.driftPausaAte || 0;
         persistenciaParDZ = s.persistenciaParDZ || {par:null, giros:0};
         persistenciaParCol = s.persistenciaParCol || {par:null, giros:0};
         transicaoAtual = s.transicaoAtual || {chave:null, giros:0};
@@ -3949,7 +3741,7 @@ if(vals.length===0){alert('Nenhum número válido');return;}
 // pros ultimos 10 no final. Se já havia histórico, o lote só soma normal (nada é cortado).
 const eraInicioDoJogo = historicoTotal.length===0;
 // [CORRIGIDO] Bug sério: antes, verificarCallAnterior() rodava a cada número do lote, mas
-// executarConciliador() (que recalcula TODOS os sinais - T Míng, Trend, Drift, Sniper, Luo Shu,
+// executarConciliador() (que recalcula TODOS os sinais - T Míng, Trend, Sniper, Luo Shu,
 // Binários) só rodava 1 vez no final do lote inteiro. Isso significava que só o 1º número do
 // lote era resolvido contra um sinal fresco - todo o resto era resolvido contra o MESMO sinal
 // congelado (o que gerava calls idênticas repetidas por dezenas de linhas no relatório).
@@ -4048,11 +3840,6 @@ document.getElementById('trendDuzAccuracy').innerHTML=
 const pctCol = trendColPredictions.total>0?Math.round(trendColPredictions.acertos/trendColPredictions.total*100):0;
 document.getElementById('trendColAccuracy').innerHTML=
     `Col: <strong>${pctCol}%</strong> (${trendColPredictions.acertos}/${trendColPredictions.total}) | base ${calib.duzColBaselinePct.toFixed(1)}%` + janelaEwmaHtml(trendColLog) + bolinhasHTML(trendColLog);
-
-
-const pctDrift = driftPredictions.total>0?Math.round(driftPredictions.acertos/driftPredictions.total*100):0;
-document.getElementById('driftAccuracy').innerHTML=
-    `Cor: <strong>${pctDrift}%</strong> (${driftPredictions.acertos}/${driftPredictions.total}) b${calib.driftBaselinePct.toFixed(0)}%` + bolinhasHTML(driftCallLog);
 }
 
 function tabelaLog(log, colunas){
@@ -4117,7 +3904,6 @@ let html='';
 html+='<h3 style="color:#3a9683;margin:10px 0 5px">1. Míng T123</h3>'+tabelaLog(t123CallLog,['De','Para','Call','Resultado']);
 html+='<h3 style="color:#3a9683;margin:15px 0 5px">1b. Anti-Míng</h3>'+tabelaLog(antiMingCallLog,['De','Para','Call','Resultado']);
 html+='<h3 style="color:#3a9683;margin:15px 0 5px">2. Trend Detector</h3>'+tabelaLog(trendCallLog,['De','Para','Tipo','Call','Resultado']);
-html+='<h3 style="color:#3a9683;margin:15px 0 5px">3. Successor Drift (Cor)</h3>'+tabelaLog(driftCallLog,['De','Para','Call','Resultado']);
 html+='<h3 style="color:#c9a961;margin:15px 0 5px">🎯 Sniper (Convergência)</h3>'+tabelaLog(sniperCallLog,['De','Para','Call','Resultado']);
 html+='<h3 style="color:#c9a961;margin:15px 0 5px">5. Quebras de Atraso</h3>'+tabelaQuebras(quebraLog);
 html+='<h3 style="color:#c9a961;margin:15px 0 5px">6. Verificação de Zona (0,5,7 + Vizinhos de Zero)</h3>'+tabelaVerificacaoZona(quebraLog);
@@ -4131,8 +3917,7 @@ function fecharRelatorio(){document.getElementById('modalRelatorio').classList.r
 // [NOVO] BUSCA EXAUSTIVA DE GATILHOS - 3 hipoteses testadas com binomial+FDR
 // (mesmo padrao ja validado no B-Adaptativo e no Candidato E/F). Convencao de
 // tempo: historicoTotal[0] = giro mais recente. "Gatilho" no indice i, "resultado"
-// (giro seguinte na cronologia real) e historicoTotal[i-1] - mesma logica ja usada
-// em analisarDrift().
+// (giro seguinte na cronologia real) e historicoTotal[i-1].
 //
 // [REDESENHADO] Ajuste pra caber dentro do teto de 250 giros (decisao do usuario,
 // nao mais 800+). Duas correcoes distintas, nao "forcar disparo":
@@ -4424,7 +4209,6 @@ linhas.push([fonte, c.de, c.para, c.tipo||'', c.call, c.acerto?'ACERTO':'ERRO'])
 adicionar('Míng T123', t123CallLog);
 adicionar('Anti-Míng', antiMingCallLog);
 adicionar('Trend', trendCallLog);
-adicionar('Drift-Cor', driftCallLog);
 adicionar('Sniper', sniperCallLog);
 adicionar('Diagonal-Ciclo', diagIntermCallLog);
 adicionar('Trigger', chavePromissoraCallLog);
@@ -4454,15 +4238,7 @@ historicoTotal=[];
 t123Predictions={total:0,acertos:0};
 trendColPredictions={total:0,acertos:0};
 trendDuzPredictions={total:0,acertos:0};
-driftPredictions={total:0,acertos:0};
-driftNumeroPredictions={total:0,acertos:0};
 sniperPredictions={total:0,acertos:0};
-cusumDriftS = 0;
-cusumDriftAlertaAtivo = false;
-cusumDriftUltimoAlerta = null;
-driftPredictionsAtivo = {total:0, acertos:0};
-driftPredictionsInibido = {total:0, acertos:0};
-driftCallLogInibido = [];
 diagIntermPredictions = {total:0, acertos:0};
 diagIntermCallLog = [];
 lastDiagIntermSignal = null;
@@ -4476,8 +4252,6 @@ chaveMotorAtivo = true;
 trendStreakErro = {DZ:0, Col:0};
 trendPausaAte = {DZ:0, Col:0};
 ultimaQuebraPorTipo = {};
-driftStreakErro = 0;
-driftPausaAte = 0;
 persistenciaParDZ = {par:null, giros:0};
 persistenciaParCol = {par:null, giros:0};
 transicaoAtual = {chave:null, giros:0};
@@ -4494,12 +4268,10 @@ torneioCallLog = [];
 torneioPredictions = {total:0, acertos:0};
 // [CORRIGIDO] o estado (EWMA/CUSUM) já resetava certo, mas a TELA do Terminal Radar não
 // era redesenhada aqui - ficava mostrando os números antigos até o próximo giro. Força a
-// atualização visual imediata do painel, igual já se faz com Trend/Drift logo abaixo.
+// atualização visual imediata do painel, igual já se faz com Trend logo abaixo.
 document.getElementById('terminalRadarContent').innerHTML = '<div class="empty-msg">Aguardando...</div>';
 t123CallLog=[];
 trendCallLog=[];
-driftCallLog=[];
-driftNumeroCallLog=[];
 sniperCallLog=[];
 antiMingPredictions={total:0,acertos:0};
 antiMingCallLog=[];
@@ -4512,8 +4284,6 @@ quebrasPendentes=[];
 lastT123Signal=null;
 lastAntiMingSignal=null;
 lastTrendSignal=null;
-lastDriftSignal=null;
-lastDriftNumeroSignal=null;
 lastSniperSet=[];
 girosDesdeUltimaAnalise=0;
 totalGirosProcessados=0;
@@ -4532,8 +4302,6 @@ document.getElementById('infoParidade').innerHTML = '';
 
 document.getElementById('trendStats').innerHTML='<div class="empty-msg">Aguardando...</div>';
 document.getElementById('trendAlerts').innerHTML='';
-
-document.getElementById('driftContent').innerHTML='<div class="drift-wait">Aguardando padrão...</div>';
 
 document.getElementById('binariosContent').innerHTML='<div class="empty-msg">Aguardando dados...</div>';
 document.getElementById('diagonalContent').innerHTML='<div class="empty-msg">Aguardando 81 giros para ativar...</div>';
