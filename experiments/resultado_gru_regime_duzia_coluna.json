@@ -1,0 +1,96 @@
+{
+  "resDuzia": {
+    "nome": "Dúzia",
+    "resultados": [
+      {
+        "fold": 1,
+        "treino": 1830,
+        "teste": 1830,
+        "tempoTreinoSeg": 11.1,
+        "acc": 0.6693989071038251,
+        "baselineHits": 0.6622950819672131
+      },
+      {
+        "fold": 2,
+        "treino": 3660,
+        "teste": 1830,
+        "tempoTreinoSeg": 19.6,
+        "acc": 0.6655737704918033,
+        "baselineHits": 0.674863387978142
+      },
+      {
+        "fold": 3,
+        "treino": 5490,
+        "teste": 1830,
+        "tempoTreinoSeg": 30.1,
+        "acc": 0.6775956284153005,
+        "baselineHits": 0.6469945355191257
+      },
+      {
+        "fold": 4,
+        "treino": 7320,
+        "teste": 1830,
+        "tempoTreinoSeg": 43.1,
+        "acc": 0.6846994535519125,
+        "baselineHits": 0.6846994535519125
+      },
+      {
+        "fold": 5,
+        "treino": 9150,
+        "teste": 1830,
+        "tempoTreinoSeg": 53.3,
+        "acc": 0.6699453551912569,
+        "baselineHits": 0.6819672131147541
+      }
+    ],
+    "media": 0.6734426229508197,
+    "mediaBaseline": 0.6701639344262296
+  },
+  "resColuna": {
+    "nome": "Coluna",
+    "resultados": [
+      {
+        "fold": 1,
+        "treino": 1830,
+        "teste": 1830,
+        "tempoTreinoSeg": 11.6,
+        "acc": 0.6907103825136612,
+        "baselineHits": 0.6797814207650273
+      },
+      {
+        "fold": 2,
+        "treino": 3660,
+        "teste": 1830,
+        "tempoTreinoSeg": 22.2,
+        "acc": 0.6693989071038251,
+        "baselineHits": 0.6693989071038251
+      },
+      {
+        "fold": 3,
+        "treino": 5490,
+        "teste": 1830,
+        "tempoTreinoSeg": 32.1,
+        "acc": 0.6683060109289618,
+        "baselineHits": 0.6628415300546449
+      },
+      {
+        "fold": 4,
+        "treino": 7320,
+        "teste": 1830,
+        "tempoTreinoSeg": 43.6,
+        "acc": 0.6781420765027323,
+        "baselineHits": 0.6743169398907104
+      },
+      {
+        "fold": 5,
+        "treino": 9150,
+        "teste": 1830,
+        "tempoTreinoSeg": 53.6,
+        "acc": 0.6797814207650273,
+        "baselineHits": 0.6486338797814207
+      }
+    ],
+    "media": 0.6772677595628416,
+    "mediaBaseline": 0.6669945355191257
+  }
+}
