@@ -1,0 +1,286 @@
+{
+  "estrutural": [
+    {
+      "fold": 1,
+      "arquivoPermanente": 1691,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.6802911534154535,
+      "exemplosRetreino": 8930,
+      "tempoTreinoSeg": 2.9,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 187,
+      "acc": 0.2706222865412446
+    },
+    {
+      "fold": 2,
+      "arquivoPermanente": 2382,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.6994949494949495,
+      "exemplosRetreino": 15840,
+      "tempoTreinoSeg": 4.7,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 188,
+      "acc": 0.27206946454413894
+    },
+    {
+      "fold": 3,
+      "arquivoPermanente": 3073,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.7008791208791209,
+      "exemplosRetreino": 22750,
+      "tempoTreinoSeg": 6.5,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 203,
+      "acc": 0.2937771345875543
+    },
+    {
+      "fold": 4,
+      "arquivoPermanente": 3764,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.6866149696561025,
+      "exemplosRetreino": 29660,
+      "tempoTreinoSeg": 8.8,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 192,
+      "acc": 0.2778581765557164
+    },
+    {
+      "fold": 5,
+      "arquivoPermanente": 4455,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.6914137270987148,
+      "exemplosRetreino": 36570,
+      "tempoTreinoSeg": 10.7,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 195,
+      "acc": 0.2821997105643994
+    },
+    {
+      "fold": 6,
+      "arquivoPermanente": 5146,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.6867525298988041,
+      "exemplosRetreino": 43480,
+      "tempoTreinoSeg": 12.6,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 173,
+      "acc": 0.2503617945007236
+    },
+    {
+      "fold": 7,
+      "arquivoPermanente": 5837,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.3398491764238936,
+      "exemplosRetreino": 50390,
+      "tempoTreinoSeg": 14.6,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 175,
+      "acc": 0.2532561505065123
+    },
+    {
+      "fold": 8,
+      "arquivoPermanente": 6528,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.6891797556719023,
+      "exemplosRetreino": 57300,
+      "tempoTreinoSeg": 17.4,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 190,
+      "acc": 0.27496382054992763
+    },
+    {
+      "fold": 9,
+      "arquivoPermanente": 7219,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.6950630742874941,
+      "exemplosRetreino": 64210,
+      "tempoTreinoSeg": 20.4,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 222,
+      "acc": 0.32127351664254705
+    },
+    {
+      "fold": 10,
+      "arquivoPermanente": 7910,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.703037120359955,
+      "exemplosRetreino": 71120,
+      "tempoTreinoSeg": 21.9,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 205,
+      "acc": 0.29667149059334297
+    },
+    {
+      "fold": 11,
+      "arquivoPermanente": 8601,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.6994104831475074,
+      "exemplosRetreino": 78030,
+      "tempoTreinoSeg": 24.5,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 184,
+      "acc": 0.2662807525325615
+    },
+    {
+      "fold": 12,
+      "arquivoPermanente": 9292,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.688603720273134,
+      "exemplosRetreino": 84940,
+      "tempoTreinoSeg": 25.6,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 214,
+      "acc": 0.3096960926193922
+    },
+    {
+      "fold": 13,
+      "arquivoPermanente": 9983,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.6946652150244964,
+      "exemplosRetreino": 91850,
+      "tempoTreinoSeg": 28,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 220,
+      "acc": 0.3183791606367583
+    },
+    {
+      "fold": 14,
+      "arquivoPermanente": 10674,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.702814904819765,
+      "exemplosRetreino": 98760,
+      "tempoTreinoSeg": 30.9,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 203,
+      "acc": 0.2937771345875543
+    },
+    {
+      "fold": 15,
+      "arquivoPermanente": 11365,
+      "retreinoSucesso": true,
+      "valAccRetreino": 0.696176776757831,
+      "exemplosRetreino": 105670,
+      "tempoTreinoSeg": 33.6,
+      "girosNoFold": 691,
+      "chamadasNoFold": 691,
+      "acertosNoFold": 201,
+      "acc": 0.29088277858176553
+    }
+  ],
+  "mlJanelas": [
+    {
+      "janela": 1,
+      "n": 10,
+      "acc": 0.2
+    },
+    {
+      "janela": 2,
+      "n": 10,
+      "acc": 0.6
+    },
+    {
+      "janela": 3,
+      "n": 10,
+      "acc": 0.4
+    },
+    {
+      "janela": 4,
+      "n": 10,
+      "acc": 0.6
+    },
+    {
+      "janela": 5,
+      "n": 10,
+      "acc": 0
+    },
+    {
+      "janela": 6,
+      "n": 10,
+      "acc": 0.2
+    },
+    {
+      "janela": 7,
+      "n": 10,
+      "acc": 0.6
+    },
+    {
+      "janela": 8,
+      "n": 10,
+      "acc": 0.3
+    },
+    {
+      "janela": 9,
+      "n": 10,
+      "acc": 0.5
+    },
+    {
+      "janela": 10,
+      "n": 10,
+      "acc": 0.6
+    },
+    {
+      "janela": 11,
+      "n": 10,
+      "acc": 0.2
+    },
+    {
+      "janela": 12,
+      "n": 10,
+      "acc": 0.5
+    },
+    {
+      "janela": 13,
+      "n": 10,
+      "acc": 0.4
+    },
+    {
+      "janela": 14,
+      "n": 10,
+      "acc": 0.6
+    },
+    {
+      "janela": 15,
+      "n": 10,
+      "acc": 0.3
+    },
+    {
+      "janela": 16,
+      "n": 10,
+      "acc": 0.3
+    },
+    {
+      "janela": 17,
+      "n": 10,
+      "acc": 0.4
+    },
+    {
+      "janela": 18,
+      "n": 10,
+      "acc": 0.3
+    },
+    {
+      "janela": 19,
+      "n": 10,
+      "acc": 0.4
+    },
+    {
+      "janela": 20,
+      "n": 10,
+      "acc": 0.5
+    }
+  ]
+}
