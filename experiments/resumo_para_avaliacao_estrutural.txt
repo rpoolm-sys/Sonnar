@@ -1,0 +1,152 @@
+RESUMO PARA AVALIAÇÃO EXTERNA — Modelo "Estrutural" do Terminal Radar
+Projeto: Míng T123 Tracker (roleta ao vivo, Roleta Brasileira Pragmatic Play)
+Arquivo do app: ming_t123.html | Dataset: dataset_mestre.json (~11.365 giros reais)
+Sessão: Claude Code, retomando pendências que travavam num sandbox sem tfjs-node
+
+============================================================
+CONTEXTO NECESSÁRIO
+============================================================
+O "Terminal Radar" prevê o dígito final (0-9) do próximo número. Ele roda um
+torneio entre 3 candidatos independentes e usa o vencedor do torneio como call
+oficial:
+  1. EWMA/CUSUM — frequência recente por terminal
+  2. ML janelas 3/5/7 — rede neural pequena, pesos FIXOS, treinada 1x offline
+  3. Estrutural — rede neural pequena (4 features), RETREINÁVEL pelo usuário
+     via botão "🧠 Retreinar" (função retreinarModeloEstrutural()), roda 100%
+     no navegador em JS puro, sem TensorFlow.
+
+O candidato "Estrutural" prevê, pra cada um dos 10 terminais, se ele está
+"estruturalmente favorecido" agora: terminais 1-6 são ligados (matematicamente)
+a uma Dúzia+Coluna específica; terminais 0,7,8,9 são ligados a Alto/Baixo
+(trocado de Cor por pedido do usuário, que não confia em Cor). As 4 features
+de entrada do modelo são:
+  1. ehGrupoEspecial (0 ou 1) — é um dos terminais 0/7/8/9?
+  2. concordancia (0, 0.5 ou 1) — DZ e/ou Col do terminal batem com a call do
+     Trend agora? (ou, pro grupo especial: o Alto/Baixo dele está favorecido?)
+  3. ewmaLigado (0 ou 1) — versão binária do mesmo sinal
+  4. atrasoLigado (0 a 1, contínuo) — há quanto tempo a categoria ligada não
+     sai, normalizado
+
+Rótulo de treino: 1 se esse terminal aparece acima do esperado numa janela de
+8 giros à frente, 0 caso contrário. Rede: 4 features → camada escondida → 1
+saída sigmoide. Treino: 30 épocas, taxa 0.05, undersampling da classe
+majoritária, split 80/20 cronológico (holdout no final, sem embaralhar).
+
+O que já estava documentado como validado (BRIEFING_PROJETO.md, testes
+anteriores): "68-69% de acurácia balanceada, estável em múltiplas janelas de
+tempo (desvio <1pp)". Essa é a métrica de VALIDAÇÃO DO TREINO (valAcc: acerta
+o rótulo binário 0/1 no holdout).
+
+============================================================
+O QUE FOI FEITO NESTA SESSÃO (Claude Code, com tfjs-node instalado)
+============================================================
+Rodou o motor REAL extraído do próprio ming_t123.html (não uma reimplementação)
+contra os 11.365 giros reais, com uma sessão contínua simulada giro a giro.
+
+1) Validação cruzada extensa (15 checkpoints de retreino ao vivo, walk-forward
+   cronológico): valAcc ficou em ~68-70% em 14 dos 15 folds — CONFIRMA o número
+   já documentado. Mas descobriu 2 coisas novas, nunca medidas antes:
+
+   A) O FOLD 7 (retreino usando os primeiros 5.146 giros acumulados) COLAPSOU
+      pra valAcc=34.0%, muito abaixo dos outros 14 folds.
+
+   B) Medindo o hit-rate TOP-3 desse candidato ISOLADO (fora do torneio, só ele
+      rankeando os 10 terminais e conferindo se o real caiu no top-3) — métrica
+      nunca medida separadamente antes, só o combinado do Torneio (70-79%) era
+      documentado — deu 28.5% médio, JUNTO ou ABAIXO do baseline teórico de
+      ~30%. Ou seja: sozinho, esse candidato não teria edge nenhum como
+      ranker, apesar do valAcc binário de 68-69%.
+
+============================================================
+DIAGNÓSTICO A — por que o fold 7 colapsou?
+============================================================
+Método: fixei o dado exatamente igual ao fold 7 (os mesmos 5.146 giros
+acumulados) e rodei retreinarModeloEstrutural() 20 VEZES SEGUIDAS nesse MESMO
+dado (o treino usa Math.random() sem seed fixa — undersampling embaralhado e
+init de pesos aleatório mudam a cada rodada, mesmo com o dado idêntico).
+
+Resultado das 20 rodadas (valAcc):
+  34.0%, 66.0%, 66.0%, 66.0%, 68.0%, 66.0%, 66.0%, 68.0%, 66.0%, 34.0%,
+  66.0%, 68.0%, 66.0%, 34.0%, 66.0%, 68.0%, 34.0%, 34.0%, 68.0%, 68.0%
+
+  - Média: 58.6% | Desvio padrão: 14.2pp | Mín 34.0% / Máx 68.0%
+  - 5 das 20 rodadas (25%) caíram exatamente em 34.0%
+  - As outras 15 rodadas caíram só em 66.0% ou 68.0% — SEM NENHUM valor
+    intermediário entre 34% e 66% em nenhuma das 20 rodadas
+
+CONCLUSÃO: não foi "dado ruim" daquele ponto específico do histórico — é uma
+instabilidade de TREINO reproduzível: ~1 em cada 4 vezes que o botão
+"🧠 Retreinar" é clicado, existe risco real de o modelo colapsar pra ~34%
+(pior que o baseline de ~50% de um classificador binário aleatório) e ser
+salvo assim, SEM AVISO NENHUM no app — o usuário não teria como saber que o
+retreino deu ruim dessa vez.
+
+Detalhe que chama atenção: 34% está bem perto do COMPLEMENTO de 66%
+(100-66=34) e perto do complemento de 68% (100-68=32). É consistente com uma
+rede tão pequena que, num subconjunto das inicializações aleatórias, o
+gradiente converge pra um mínimo local onde a fronteira de decisão fica
+efetivamente INVERTIDA (prevê a classe errada na maior parte dos casos) e
+NÃO escapa disso em 30 épocas.
+
+============================================================
+DIAGNÓSTICO B — por que o top-3 isolado fica perto do baseline?
+============================================================
+Método: treinei um modelo com o dataset inteiro (11.365 giros, 112.580
+exemplos, valAcc=32.7% nessa amostra específica de holdout — já ilustra a
+variância) e depois rodei a simulação completa giro a giro, tirando uma
+"foto" das 10 probabilidades preditas (uma por terminal) a cada 500 giros
+(22 fotos no total). Exemplos reais capturados:
+
+  Giro 500:  top3=[T0:0.75, T7:0.75, T8:0.75] | gap(3º-4º)=0 | favoráveis=10/10
+  Giro 1000: top3=[T0:0.80, T9:0.80, T7:0.75] | gap(3º-4º)=0 | favoráveis=10/10
+  Giro 3500: top3=[T7:0.80, T8:0.80, T0:0.75] | gap(3º-4º)=0 | favoráveis=10/10
+  (mesmo padrão nas 22 fotos, sem exceção)
+
+  - Gap médio entre o 3º e o 4º colocado: 0.000 (ZERO em todas as 22 fotos)
+  - Terminais com probabilidade >0.5 ("favoráveis"): 10 de 10, SEMPRE
+
+CONCLUSÃO: a rede produz só um punhado de valores de saída discretos (0.75,
+0.80 e pouco mais — não um contínuo de verdade), e em TODA amostra observada,
+os 10 terminais empatam nesses poucos valores, com TODOS acima de 0.5. O
+"top-3" nunca é uma escolha por confiança real — é sempre um desempate entre
+terminais tecnicamente empatados, decidido só pela ordem de índice (0,1,2...9)
+que o JS usa como critério de desempate estável no sort. Isso bate exatamente
+com a hipótese "poucos buckets discretos de probabilidade, muito empate" que
+o usuário levantou antes de eu confirmar.
+
+============================================================
+HIPÓTESE DE CAUSA RAIZ COMUM (não confirmada, só levantada)
+============================================================
+As 4 features de entrada são quase todas discretas/quase-binárias
+(ehGrupoEspecial é 0/1 puro; concordancia e ewmaLigado só assumem
+0/0.5/1; só atrasoLigado é de fato contínuo). Com uma entrada dessa
+granularidade tão baixa, existem poucas combinações de entrada possíveis —
+o que pode explicar OS DOIS problemas ao mesmo tempo:
+  - Poucas combinações de entrada → poucos "poços" no espaço de perda →
+    mais chance de a rede cair num poço ruim dependendo só da inicialização
+    aleatória (explica o Diagnóstico A)
+  - Poucas combinações de entrada → poucos valores de saída possíveis →
+    empate constante entre terminais (explica o Diagnóstico B)
+
+Isso é uma hipótese, não uma conclusão fechada — não foi testada
+diretamente (ex: não tentei aumentar a rede, mudar a taxa de aprendizado,
+ou adicionar mais features pra ver se o problema some).
+
+============================================================
+O QUE NÃO FOI FEITO / DECISÕES EM ABERTO
+============================================================
+Nenhuma mudança de código foi feita em ming_t123.html a partir desses 2
+diagnósticos — só investigação. Fica em aberto pra decisão:
+  1. O retreino tem ~25% de chance de salvar um modelo colapsado sem avisar
+     o usuário. Vale um gate de valAcc mínimo (ex: rejeitar e re-tentar
+     automaticamente se valAcc < 50%)?
+  2. O candidato Estrutural sozinho não tem edge de ranking (28.5% ~ baseline)
+     apesar do valAcc de treino ser bom — isso não invalida o Torneio
+     combinado (70-79%, que é a call oficial), mas levanta dúvida sobre
+     quanto esse candidato específico realmente contribui pro Torneio além
+     de "aprovar/reprovar" no portão de edge. Vale investigar mais (mais
+     features, rede maior) ou aceitar como está, já que o combinado funciona?
+
+Scripts e resultados brutos completos em experiments/:
+  - validacao_cruzada_extensa.js, resultado_validacao_cruzada_extensa.json
+  - diagnostico_estrutural.js, resultado_diagnostico_estrutural.json
