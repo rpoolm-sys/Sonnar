@@ -1,0 +1,23 @@
+{
+  "name": "sonnar",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rpoolm-sys/Sonnar.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rpoolm-sys/Sonnar/issues"
+  },
+  "homepage": "https://github.com/rpoolm-sys/Sonnar#readme",
+  "dependencies": {
+    "@tensorflow/tfjs-node": "^4.22.0"
+  }
+}
