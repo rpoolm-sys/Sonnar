@@ -197,11 +197,21 @@ button:hover{opacity:.85}
      navegador (rede pequena, JS puro, sem precisar de Python/servidor). -->
 <button onclick="acionarRetreino()" style="font-size:10px;padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--ink);cursor:pointer" title="Retreina o modelo de reforço estrutural com todo o arquivo permanente acumulado">🧠 Retreinar</button>
 <span id="statusRetreino" style="font-size:9px;color:var(--muted);margin-left:4px"></span>
+<!-- [NOVO] Modo Compacto - alterna pra visão de 1 linha por rastreador, pensado pro celular
+     e janelas pequenas de PC. Não muda nenhum cálculo, só a exibição. -->
+<button onclick="alternarModoCompacto()" style="font-size:10px;padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--ink);cursor:pointer" title="Alterna entre visão completa e visão compacta (1 linha por rastreador)">📱 Modo Compacto</button>
 <!-- [MOVIDO] Status agora fica aqui ao lado do Reset, e a barra do topo sumiu.
      Aviso de "salvo automaticamente" removido a pedido do usuário. -->
 <span style="font-size:10px;align-self:center;margin-left:10px"><span class="status-dot bg-sta" id="statusDot"></span> STATUS: <strong id="statusText">AGUARDANDO DADOS</strong></span>
 <span style="display:none">TENDÊNCIA: <strong id="trendText">--</strong></span>
 <span style="display:none">PRÓXIMA ATUALIZAÇÃO EM: <strong id="nextUpdate">5</strong> GIROS</span>
+</div>
+
+<!-- [NOVO] Container do Modo Compacto - escondido por padrão, mostrado via JS quando ativado -->
+<div id="compactoContainer" style="display:none;max-width:600px;margin:0 auto 12px auto">
+    <div id="compactoUltimos"></div>
+    <div id="compactoQuebraAlerta"></div>
+    <div id="compactoLinhas"></div>
 </div>
 
 <div class="tier-label first"><span class="txt">明 T123 Tracker</span><span class="rule"></span></div>
@@ -2037,6 +2047,116 @@ function retreinarModeloEstrutural(callbackProgresso){
     return {sucesso:true, valAcc, exemplos: exemplos.length, giros: seq.length};
 }
 
+// ============================================================================
+// [NOVO] MODO COMPACTO - visão de 1 linha por rastreador, pensada pro celular e janelas
+// pequenas de PC. Não recalcula nada - só lê o estado que os motores já produzem
+// (call atual, log, predictions) e monta uma linha compacta por rastreador.
+// ============================================================================
+let modoCompactoAtivo = false;
+const MODO_COMPACTO_KEY = 'mingModoCompacto';
+
+function alternarModoCompacto(){
+    modoCompactoAtivo = !modoCompactoAtivo;
+    try{ localStorage.setItem(MODO_COMPACTO_KEY, modoCompactoAtivo ? '1' : '0'); }catch(e){}
+    aplicarVisibilidadeModoCompacto();
+}
+
+function aplicarVisibilidadeModoCompacto(){
+    const compacto = document.getElementById('compactoContainer');
+    const stacks = document.querySelectorAll('.stack, .tier-label');
+    if(compacto) compacto.style.display = modoCompactoAtivo ? 'block' : 'none';
+    stacks.forEach(el => { el.style.display = modoCompactoAtivo ? 'none' : ''; });
+}
+
+function carregarPreferenciaModoCompacto(){
+    try{
+        modoCompactoAtivo = localStorage.getItem(MODO_COMPACTO_KEY) === '1';
+    }catch(e){ modoCompactoAtivo = false; }
+    aplicarVisibilidadeModoCompacto();
+}
+
+// Monta 1 linha compacta: nome, call atual, indicador opcional, %, bolinhas
+function linhaCompacta(nome, callTexto, log, predictions, indicador){
+    const pct = (predictions && predictions.total>0) ? Math.round(predictions.acertos/predictions.total*100) : null;
+    const pctTxto = pct!==null ? `${pct}% (${predictions.acertos}/${predictions.total})` : '—';
+    return `<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px">
+        <span style="min-width:70px;color:var(--muted);flex-shrink:0">${nome}</span>
+        <span style="color:var(--jade);font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${callTexto||'—'}${indicador?' '+indicador:''}</span>
+        <span style="color:var(--gold);font-weight:600;min-width:70px;text-align:right;flex-shrink:0">${pctTxto}</span>
+        <span style="flex-shrink:0">${bolinhasHTML(log)}</span>
+    </div>`;
+}
+
+function renderModoCompacto(sTrend, sniper, sTrigger){
+    if(!modoCompactoAtivo) return;
+
+    // [NOVO] Linha de últimos resultados - mesma ordem da matriz (mais recente primeiro),
+    // reusa as mesmas classes CSS (cell/red/black/green) pra manter cor idêntica.
+    const divUltimos = document.getElementById('compactoUltimos');
+    if(divUltimos){
+        const qtd = 10; // "pelo menos 7" - usa 10 pra fechar 1 linha redonda
+        const exibicao = historicoTotal.slice(0, qtd);
+        const corTexto = {red:'var(--crimson)', black:'#ccc', green:'var(--jade)'};
+        let htmlUltimos = '<div style="display:flex;gap:10px;flex-wrap:wrap;padding:6px 8px;font-family:var(--mono);font-size:15px;font-weight:700">';
+        exibicao.forEach(num=>{
+            htmlUltimos += `<span style="color:${corTexto[getCor(num)]}">${num}</span>`;
+        });
+        htmlUltimos += '</div>';
+        divUltimos.innerHTML = htmlUltimos;
+    }
+
+    // Alerta de quebra - reusa exatamente o mesmo alerta que ja existe (quebrasEsteGiro)
+    const divQuebra = document.getElementById('compactoQuebraAlerta');
+    if(divQuebra){
+        let htmlQuebra = '';
+        if(quebrasEsteGiro && quebrasEsteGiro.length>0){
+            quebrasEsteGiro.forEach(q=>{
+                htmlQuebra += `<div class="atraso-quebra" style="border-color:#e0b84a;background:#3a2f14;margin-bottom:6px">🔥 QUEBRA AGORA: ${q.tipo} ${q.valor} saiu após ${q.atraso} giros sem aparecer!</div>`;
+            });
+        }
+        divQuebra.innerHTML = htmlQuebra;
+    }
+
+    const div = document.getElementById('compactoLinhas');
+    if(!div) return;
+    let html = '';
+
+    // Trend (DZ + Col juntos numa linha so, se tiver os dois)
+    if(sTrend && (sTrend.parDuz.length>0 || sTrend.parCol.length>0)){
+        const txt = [sTrend.parDuz.length?'DZ'+sTrend.parDuz.join('+DZ'):'', sTrend.parCol.length?'Col'+sTrend.parCol.join('+Col'):''].filter(Boolean).join(' + ');
+        const logComb = trendCallLog.slice(-50); // combinado DZ+Col pra bolinhas
+        const predComb = {total: trendDuzPredictions.total+trendColPredictions.total, acertos: trendDuzPredictions.acertos+trendColPredictions.acertos};
+        html += linhaCompacta('Trend', txt, logComb, predComb, null);
+    } else {
+        html += linhaCompacta('Trend', 'Sem call', [], {total:0,acertos:0}, null);
+    }
+
+    // Sniper
+    if(sniper && sniper.numeros && sniper.numeros.length>0){
+        html += linhaCompacta('Sniper', sniper.numeros.map(n=>n).join(','), sniperCallLog, sniperPredictions, null);
+    } else {
+        html += linhaCompacta('Sniper', 'Sem call', [], {total:0,acertos:0}, null);
+    }
+
+    // Trigger
+    if(sTrigger && sTrigger.label){
+        html += linhaCompacta('Trigger', sTrigger.label, chavePromissoraCallLog, chavePromissoraPredictions, null);
+    } else {
+        html += linhaCompacta('Trigger', 'Sem call', [], {total:0,acertos:0}, null);
+    }
+
+    // Terminal Radar (torneio)
+    const resultadoTorneio = rodarTorneioTerminal();
+    if(resultadoTorneio.vencedor){
+        const txt = `${resultadoTorneio.vencedor}: ${resultadoTorneio.pacote.map(t=>'T'+t).join('+')}`;
+        html += linhaCompacta('Terminal', txt, torneioCallLog, torneioPredictions, resultadoTorneio.indicador);
+    } else {
+        html += linhaCompacta('Terminal', 'Silêncio', [], {total:0,acertos:0}, null);
+    }
+
+    div.innerHTML = html;
+}
+
 function acionarRetreino(){
     if(historicoArquivoPermanente.length < 500){
         alert('Precisa de pelo menos 500 giros arquivados pra retreinar (tem '+historicoArquivoPermanente.length+'). Continue jogando e tente de novo depois.');
@@ -3081,7 +3201,7 @@ lastDiagIntermSignal = sInterm;
 const sniper = executarSniperUnico(sTrend, sTrigger);
 atualizarPainelOndas();
 renderSniperUnico(sniper);
-lastSniperSet = sniper.numeros;
+renderModoCompacto(sTrend, sniper, sTrigger);lastSniperSet = sniper.numeros;
 atualizarSniperTitle();
 atualizarHistoricoQuebra();
 
@@ -4340,6 +4460,13 @@ document.getElementById('sniperTitle').textContent='EWMA Alinhado (Col+DZ+Termin
 document.getElementById('sniperBolinhas').innerHTML='';
 document.getElementById('ondasContent').innerHTML='<div class="no-signal">Aguardando histórico...</div>';
 
+// [NOVO] Modo Compacto tambem precisa ser limpo aqui - so eh redesenhado dentro de
+// executarConciliador() (a cada giro novo), entao sem isso ficava mostrando os numeros/calls
+// antigos ate o proximo giro chegar, mesmo com os dados ja resetados por baixo.
+document.getElementById('compactoUltimos').innerHTML='';
+document.getElementById('compactoQuebraAlerta').innerHTML='';
+document.getElementById('compactoLinhas').innerHTML='<div class="empty-msg" style="padding:8px">Aguardando dados...</div>';
+
 document.getElementById('statusDot').className='status-dot bg-sta';
 document.getElementById('statusText').textContent='AGUARDANDO DADOS';
 document.getElementById('trendText').textContent='--';
@@ -4353,6 +4480,7 @@ inicializarCalibracao();
 const estadoRestaurado = carregarEstado();
 carregarArquivoPermanente();
 carregarModeloEstrutural();
+carregarPreferenciaModoCompacto();
 atualizarContadorArquivo();
 renderMatriz();
 atualizarStats();
@@ -4373,4 +4501,3 @@ if(estadoRestaurado && historicoTotal.length>0){
 </script>
 </body>
 </html>
-

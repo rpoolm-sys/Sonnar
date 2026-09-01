@@ -15,7 +15,7 @@ mingScript = mingScript.replace(
 );
 
 class FakeElement {
-  constructor(id) { this.id = id; this._innerHTML = ''; this._textContent = ''; this.value = '';
+  constructor(id) { this.id = id; this._innerHTML = ''; this._textContent = ''; this.value = ''; this.style = {};
     this.classList = { add(){}, remove(){}, contains(){return false;}, toggle(){} }; }
   get innerHTML() { return this._innerHTML; } set innerHTML(v) { this._innerHTML = v; }
   get textContent() { return this._textContent; } set textContent(v) { this._textContent = v; }
@@ -24,7 +24,7 @@ class FakeElement {
 const elements = {};
 function getElementById(id) { if (!elements[id]) elements[id] = new FakeElement(id); return elements[id]; }
 const localStorageStore = {};
-global.document = { getElementById, createElement: () => new FakeElement('anon'), body: { appendChild(){}, removeChild(){} } };
+global.document = { getElementById, createElement: () => new FakeElement('anon'), body: { appendChild(){}, removeChild(){} }, querySelectorAll: () => [] };
 global.localStorage = {
   getItem: k => (k in localStorageStore ? localStorageStore[k] : null),
   setItem: (k, v) => { localStorageStore[k] = String(v); },
