@@ -2169,13 +2169,26 @@ function taxaJanelaRapida(log, tam){
     return recentes.filter(c=>c.acerto).length/recentes.length;
 }
 
-function rodarTorneioTerminal(sTrend){
-    // monta os 3 candidatos com seus respectivos: pacote de numeros/terminais, log, baseline
-    const top4EWMA = Object.keys(ewmaTerminais).map(t=>({t:parseInt(t), ewma:ewmaTerminais[t]})).sort((a,b)=>b.ewma-a.ewma).slice(0,4).map(x=>x.t);
-    const rankingML = historicoTotal.length>=7 ? preverModeloTerminal(historicoTotal) : [];
-    const top3ML = rankingML.slice(0,3).map(r=>r.t);
-    const rankingEstrutural = modeloEstrutural ? [0,1,2,3,4,5,6,7,8,9].map(t=>({t, prob:preverModeloEstrutural(t, historicoTotal, sTrend)})).sort((a,b)=>b.prob-a.prob) : [];
-    const top3Estrutural = rankingEstrutural.slice(0,3).map(r=>r.t);
+function rodarTorneioTerminal(){
+    // [CORRIGIDO - VAZAMENTO DE DADO] Antes, os pacotes eram recalculados aqui do ZERO
+    // (top4EWMA direto de ewmaTerminais, rankingML/rankingEstrutural direto de
+    // historicoTotal) - mas quando essa funcao roda dentro de atualizarEVerificarTorneio(),
+    // o giro que esta sendo avaliado JA foi processado por atualizarTerminalRadar() (que
+    // atualiza ewmaTerminais) e pelo check do Estrutural, alguns passos antes no mesmo
+    // executarConciliador(). Ou seja: o pacote do EWMA/CUSUM, por exemplo, ja "via" o
+    // terminal que acabou de sair antes de ser comparado contra ele - inflava a
+    // assertividade do Torneio artificialmente (EWMA/CUSUM chegou a medir 99,8% de acerto
+    // quando vencia, o que e estatisticamente impossivel). Corrigido lendo a ULTIMA entrada
+    // ja calculada de cada callLog - cada um deles ja e blindado contra esse vazamento em
+    // outro lugar do codigo (terminalRadarCallLog usa o estado ANTES do loop de update do
+    // EWMA; mlTerminalCallLog e estruturalCallLog usam histAntes/histAntesEstrut, sem o
+    // numero que acabou de entrar).
+    const ewmaEntry = terminalRadarCallLog.length ? terminalRadarCallLog[terminalRadarCallLog.length-1] : null;
+    const mlEntry = mlTerminalCallLog.length ? mlTerminalCallLog[mlTerminalCallLog.length-1] : null;
+    const estrEntry = estruturalCallLog.length ? estruturalCallLog[estruturalCallLog.length-1] : null;
+    const top4EWMA = ewmaEntry ? ewmaEntry.pacote : [];
+    const top3ML = mlEntry ? mlEntry.top3 : [];
+    const top3Estrutural = estrEntry ? estrEntry.top3 : [];
 
     const candidatos = [
         {nome:'EWMA/CUSUM', pacote:top4EWMA, log:terminalRadarCallLog, baseline:0.40},
@@ -2217,9 +2230,9 @@ function rodarTorneioTerminal(sTrend){
     return {vencedor:melhor.nome, pacote:melhor.pacote, ativos:aprovados.map(c=>c.nome), indicador};
 }
 
-function atualizarEVerificarTorneio(novoNumero, sTrend){
+function atualizarEVerificarTorneio(novoNumero){
     // roda o torneio com o estado ANTES desse giro, depois confere contra o real
-    const resultado = rodarTorneioTerminal(sTrend);
+    const resultado = rodarTorneioTerminal();
     if(resultado.vencedor){
         const tReal = terminalDig(novoNumero);
         const hit = resultado.pacote.includes(tReal);
@@ -2257,7 +2270,7 @@ function renderTerminalRadar(sTrend){
 
     // [NOVO] TORNEIO - call oficial, no topo, com sequencia G/R (mais importante que %)
     let html = '';
-    const resultadoTorneio = rodarTorneioTerminal(sTrend);
+    const resultadoTorneio = rodarTorneioTerminal();
     html += `<div style="padding:6px;background:rgba(201,169,97,0.08);border:1px solid var(--gold);border-radius:4px;margin-bottom:8px">`;
     html += `<div style="font-size:9px;color:var(--gold);font-weight:600;margin-bottom:3px">🏆 CALL DO TORNEIO</div>`;
     if(resultadoTorneio.vencedor){
@@ -3051,7 +3064,7 @@ if(historicoTotal.length>0 && modeloEstrutural){
 // [NOVO] Torneio - roda e verifica a call OFICIAL (combinacao dos 3 candidatos)
 let ultimoResultadoTorneio = null;
 if(historicoTotal.length>0){
-    ultimoResultadoTorneio = atualizarEVerificarTorneio(historicoTotal[0], sTrend);
+    ultimoResultadoTorneio = atualizarEVerificarTorneio(historicoTotal[0]);
 }
 
 renderTerminalRadar(sTrend);
