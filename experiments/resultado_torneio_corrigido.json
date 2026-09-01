@@ -1,0 +1,30 @@
+{
+  "original": {
+    "ML 3/5/7": {
+      "total": 3269,
+      "acertos": 1484
+    },
+    "EWMA/CUSUM": {
+      "total": 3947,
+      "acertos": 3938
+    },
+    "Estrutural": {
+      "total": 1358,
+      "acertos": 727
+    }
+  },
+  "corrigido": {
+    "ML 3/5/7": {
+      "total": 3269,
+      "acertos": 1701
+    },
+    "EWMA/CUSUM": {
+      "total": 3947,
+      "acertos": 2426
+    },
+    "Estrutural": {
+      "total": 1358,
+      "acertos": 732
+    }
+  }
+}
