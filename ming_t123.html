@@ -2296,8 +2296,8 @@ function renderTerminalRadar(sTrend){
         const rankingML = preverModeloTerminal(historicoTotal);
         const top3ML = rankingML.slice(0,3);
         html += `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">`;
-        html += `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">🤖 Call do Modelo (janelas 3/5/7)</div>`;
-        html += `<div class="stat-row"><span class="stat-label">Top 3</span><span class="stat-value" style="color:var(--jade)">${top3ML.map(r=>'T'+r.t).join('+')}</span></div>`;
+        html += `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">📊 Candidato ML 3/5/7 (referência, não é a call)</div>`;
+        html += `<div class="stat-row"><span class="stat-label">Top 3</span><span class="stat-value" style="color:var(--muted)">${top3ML.map(r=>'T'+r.t).join('+')}</span></div>`;
         if(mlTerminalPredictions.total>0){
             const pctML = Math.round(mlTerminalPredictions.acertos/mlTerminalPredictions.total*100);
             html += `<div class="accuracy-box" style="margin-top:4px">Assertividade: <strong>${pctML}%</strong> (${mlTerminalPredictions.acertos}/${mlTerminalPredictions.total}) base ~30%${bolinhasHTML(mlTerminalCallLog)}</div>`;
@@ -2310,8 +2310,8 @@ function renderTerminalRadar(sTrend){
         const rankingEstrut = [0,1,2,3,4,5,6,7,8,9].map(t=>({t, prob:preverModeloEstrutural(t, historicoTotal, sTrend)})).sort((a,b)=>b.prob-a.prob);
         const top3Estrut = rankingEstrut.slice(0,3);
         html += `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">`;
-        html += `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">🧬 Call Estrutural (auto-aprendizagem)</div>`;
-        html += `<div class="stat-row"><span class="stat-label">Top 3</span><span class="stat-value" style="color:var(--jade)">${top3Estrut.map(r=>'T'+r.t).join('+')}</span></div>`;
+        html += `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">📊 Candidato Estrutural (referência, não é a call)</div>`;
+        html += `<div class="stat-row"><span class="stat-label">Top 3</span><span class="stat-value" style="color:var(--muted)">${top3Estrut.map(r=>'T'+r.t).join('+')}</span></div>`;
         if(estruturalPredictions.total>0){
             const pctEstrut = Math.round(estruturalPredictions.acertos/estruturalPredictions.total*100);
             html += `<div class="accuracy-box" style="margin-top:4px">Assertividade: <strong>${pctEstrut}%</strong> (${estruturalPredictions.acertos}/${estruturalPredictions.total}) base ~30%${bolinhasHTML(estruturalCallLog)}</div>`;
