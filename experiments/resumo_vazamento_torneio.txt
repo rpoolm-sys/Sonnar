@@ -1,0 +1,170 @@
+RESUMO PARA AVALIAÇÃO EXTERNA — Vazamento de dado no Torneio (Terminal Radar)
+Projeto: Míng T123 Tracker (roleta ao vivo, Roleta Brasileira Pragmatic Play)
+Arquivo do app: ming_t123.html | Dataset: dataset_mestre.json (~11.365 giros reais)
+Sessão: Claude Code
+
+============================================================
+CONTEXTO NECESSÁRIO
+============================================================
+O "Terminal Radar" prevê o dígito final (0-9) do próximo número. Roda um
+torneio entre 3 candidatos independentes; o vencedor do torneio (função
+rodarTorneioTerminal()) vira a call oficial:
+  1. EWMA/CUSUM — frequência recente por terminal (pacote de 4 terminais,
+     baseline ~40%)
+  2. ML janelas 3/5/7 — rede neural pequena, pesos FIXOS treinados 1x
+     offline (pacote de 3 terminais, baseline ~30%)
+  3. Estrutural — rede neural pequena (4 features), retreinável pelo
+     usuário (pacote de 3 terminais, baseline ~30%)
+
+Regra do torneio: só concorrem candidatos com EWMA de acerto acima do
+próprio baseline + margem (checado via janelaEEwma() sobre o LOG de cada
+candidato). Entre os aprovados, vence quem tem a janela rápida (últimas
+10 calls) mais forte agora (taxaJanelaRapida() sobre o mesmo LOG).
+
+Documentado como validado no BRIEFING_PROJETO.md: "Torneio combinado:
+70-79% de acerto real, dependendo da sessão testada."
+
+============================================================
+PERGUNTA ORIGINAL DO RICARDO
+============================================================
+"Quando o Estrutural é especificamente o VENCEDOR do torneio (não só
+aprovado, mas o candidato escolhido pra call), qual a assertividade
+real dele nesses casos?" — diferente do top-3 isolado (que mede em todo
+giro, vencendo ou não), aqui filtrando só os giros em que ele liderou.
+
+============================================================
+DESCOBERTA: VAZAMENTO DE DADO NO TORNEIO
+============================================================
+Ao rodar essa medição (giro a giro, sessão contínua simulada, 15
+checkpoints de retreino ao vivo do Estrutural, ~11.3k giros reais),
+apareceu um número impossível: o candidato EWMA/CUSUM acertou 99.8%
+das vezes que venceu (3938/3947). Nenhuma previsão real de roleta
+chega perto disso.
+
+CAUSA RAIZ (confirmada por leitura de código): dentro de
+executarConciliador(), a ordem de execução é:
+
+  1. atualizarTerminalRadar(historicoTotal[0])  <- ATUALIZA ewmaTerminais
+     com o giro que ACABOU de sair
+  2. atualizarEVerificarTorneio(historicoTotal[0], sTrend)
+       -> rodarTorneioTerminal(sTrend)
+            -> recalcula top4EWMA do ZERO, direto de ewmaTerminais
+               (que JÁ FOI atualizado no passo 1 com o giro sendo avaliado)
+
+Ou seja: o pacote do EWMA/CUSUM usado pra checar hit/miss é montado
+DEPOIS que o EWMA já "viu" o giro que está sendo avaliado - o terminal
+que acabou de sair quase sempre entra no top-4 só por ter acabado de
+ser contado. É checagem de resposta, não previsão.
+
+Importante: os candidatos JÁ TÊM checks individuais em outro lugar do
+código, corretamente blindados contra esse vazamento (usam o estado
+ANTES do giro atual):
+  - EWMA/CUSUM: terminalRadarCallLog (calculado no TOPO de
+    atualizarTerminalRadar, ANTES do loop que atualiza ewmaTerminais)
+  - ML 3/5/7: mlTerminalCallLog (usa histAntes = historicoTotal.slice(1))
+  - Estrutural: estruturalCallLog (usa histAntesEstrut =
+    historicoTotal.slice(1))
+
+O bug está isolado em rodarTorneioTerminal(), que recalcula tudo do
+zero em vez de reusar essas 3 fontes já blindadas.
+
+============================================================
+COMPARAÇÃO: ORIGINAL (com vazamento) vs CORRIGIDO (sem vazamento)
+============================================================
+Método do "corrigido": reconstrói rodarTorneioTerminal() lendo a ÚLTIMA
+entrada de cada callLog (já blindada) em vez de recalcular. Roda em
+paralelo com o original, giro a giro, na MESMA sessão simulada.
+
+              ORIGINAL (com vazamento)   CORRIGIDO (sem vazamento)
+ML 3/5/7:     45.4% (1484/3269)          52.0% (1701/3269)
+EWMA/CUSUM:   99.8% (3938/3947)          61.5% (2426/3947)
+Estrutural:   53.5% (727/1358)           53.9% (732/1358)
+TOTAL:        71.7% (6149/8574)          56.7% (4859/8574)
+
+O total ORIGINAL (71.7%) bate quase exato com o "70-79%" já documentado
+como achado validado - forte indício de que esse número está inflado
+pelo vazamento, majoritariamente via EWMA/CUSUM.
+
+============================================================
+OBJEÇÃO METODOLÓGICA DO RICARDO (procedente, verificada a fundo)
+============================================================
+Ricardo notou uma inconsistência real na tabela acima: vazamento de
+dado deveria, na pior hipótese, só INFLAR o resultado (nunca prejudicar
+- é "ver a resposta antes de responder"). O EWMA/CUSUM se comportou
+como esperado (caiu de 99.8% pra 61.5%). Mas o ML 3/5/7 MELHOROU
+(45.4% -> 52.0%) depois de "remover" o vazamento - o que não bate com
+essa lógica, SE as duas colunas estivessem comparando populações
+diferentes de giros (o próprio vazamento poderia mudar quem "vence"
+cada giro, e as duas colunas estariam avaliando conjuntos diferentes
+disfarçados de comparação direta).
+
+Pergunta feita: as duas colunas usam exatamente os MESMOS giros como
+"vitória de cada candidato" nas duas versões, ou o vazamento muda quem
+é classificado como vencedor?
+
+RESPOSTA, com 2 provas independentes:
+
+1) PROVA ESTRUTURAL (código): a decisão de QUEM VENCE (portão +
+   desempate por momentum) usa SÓ o campo ".log" de cada candidato
+   (via janelaEEwma(c.log) e taxaJanelaRapida(c.log,...)) - esses logs
+   são os MESMOS objetos, preenchidos fora de rodarTorneioTerminal(),
+   e NÃO são afetados pelo vazamento (que só atinge o campo ".pacote",
+   usado DEPOIS de decidido o vencedor, só pra checar hit/miss). Ou
+   seja: o código garante estruturalmente que "quem vence" é idêntico
+   nas duas versões - só muda se o palpite desse vencedor acerta ou não.
+
+2) PROVA EMPÍRICA: o "n" (quantas vezes cada candidato venceu) bateu
+   EXATO nas duas colunas da tabela acima:
+     ML 3/5/7:   3269 = 3269
+     EWMA/CUSUM: 3947 = 3947
+     Estrutural: 1358 = 1358
+   Essa precisão em 3 categorias, sobre 8.574 giros, seria
+   estatisticamente impossível se as populações fossem diferentes -
+   exigiria uma troca simétrica improvável entre as 3 categorias que
+   preservasse os 3 totais exatos por coincidência.
+
+EXPLICAÇÃO para o ML 3/5/7 ter melhorado (mecanismo DIFERENTE do
+EWMA/CUSUM, não uma contradição): a versão com vazamento do ML 3/5/7
+usa `historicoTotal` INTEIRO (incluindo o giro sendo avaliado) como
+entrada pra rede, em vez do `histAntes = historicoTotal.slice(1)`
+(sem esse giro) que o resto do código usa com cuidado pra esse mesmo
+modelo. Isso não é "ver a resposta" no sentido tautológico do EWMA -
+é DESALINHAR a janela que a rede foi treinada pra ler (últimos 3/5/7
+giros ANTERIORES ao alvo, não giro-alvo + 2/4/6 anteriores). Um input
+fora da distribuição de treino pode piorar a previsão tanto quanto
+melhorar - e foi o que aconteceu aqui. Os dois mecanismos (EWMA
+tautológico vs. ML desalinhado) são fisicamente diferentes, por isso
+o efeito do "vazamento" tem sinais opostos nos dois candidatos - isso
+é esperado, não é uma inconsistência.
+
+Uma terceira tentativa de prova (verificação giro a giro, contando
+divergências de vencedor diretamente) foi iniciada mas travou de forma
+anormalmente lenta (23+ minutos rodando, contra ~1 minuto de scripts de
+estrutura quase idêntica) e foi encerrada manualmente sem chegar ao
+fim - não foi investigada a causa da lentidão (script descartável, sem
+efeito em produção). As provas 1 e 2 acima já são suficientes e não
+dependiam desse terceiro script.
+
+============================================================
+STATUS ATUAL (nada disso foi aplicado ainda)
+============================================================
+- O vazamento foi CONFIRMADO (código + números).
+- A metodologia de comparação (original vs corrigido) foi VALIDADA
+  (mesma população de giros nas duas colunas, provado).
+- O número corrigido do Torneio combinado é 56.7% (4859/8574),
+  substituindo o "70-79%" documentado hoje - mas essa substituição
+  AINDA NÃO foi feita no BRIEFING_PROJETO.md, por decisão do Ricardo
+  (queria a metodologia validada primeiro - o que este documento cobre).
+- A correção de código em ming_t123.html (fazer rodarTorneioTerminal()
+  reusar os call logs já blindados em vez de recalcular do zero) foi
+  AUTORIZADA pelo Ricardo mas AINDA NÃO foi aplicada - ele pediu pra
+  resolver a objeção metodológica antes de seguir, o que este
+  documento também cobre. Falta decisão explícita pra:
+  (a) aplicar a correção em ming_t123.html e testar, e/ou
+  (b) atualizar o BRIEFING_PROJETO.md com o número validado.
+
+Scripts e resultados brutos completos em experiments/:
+  - assertividade_estrutural_vencedor.js,
+    resultado_assertividade_vencedor.json
+  - torneio_corrigido_sem_vazamento.js, resultado_torneio_corrigido.json
+  - verificacao_mesma_populacao.js (travou, sem resultado completo)
