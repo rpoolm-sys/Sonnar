@@ -723,7 +723,15 @@ function atualizarHistoricoQuebra(){
         const q = ultimaQuebraPorTipo[t];
         html += '<tr style="border-bottom:1px solid var(--border)">';
         if(q){
-            html += `<td style="padding:3px 4px;color:var(--muted)">${t}</td><td style="padding:3px 4px;color:var(--gold);font-weight:700">${q.valor}</td><td style="padding:3px 4px;color:var(--ink)">${q.atraso}g</td><td style="padding:3px 4px;color:var(--muted)">→</td><td style="padding:3px 4px;color:var(--ink);font-weight:700">${q.sucessor} (${q.sucessorTerminal})</td>`;
+            // [NOVO] Destaque dourado quando a quebra do Número foi longa (atraso>=50, mesmo
+            // limiar validado pro candidato de quebra) - só visual, não alimenta nenhum motor
+            // nem interfere na lógica de previsão, é só um alerta pro Ricardo notar.
+            const ehQuebraLonga = (t==='Número' && q.atraso >= QUEBRA_LIMIAR);
+            const corValor = ehQuebraLonga ? '#ffd700' : 'var(--gold)';
+            const corAtraso = ehQuebraLonga ? '#ffd700' : 'var(--ink)';
+            const corSucessor = ehQuebraLonga ? '#ffd700' : 'var(--ink)';
+            const marcador = ehQuebraLonga ? ' ⭐' : '';
+            html += `<td style="padding:3px 4px;color:var(--muted)">${t}${marcador}</td><td style="padding:3px 4px;color:${corValor};font-weight:700">${q.valor}</td><td style="padding:3px 4px;color:${corAtraso}">${q.atraso}g</td><td style="padding:3px 4px;color:var(--muted)">→</td><td style="padding:3px 4px;color:${corSucessor};font-weight:700">${q.sucessor} (${q.sucessorTerminal})</td>`;
         }else{
             html += `<td style="padding:3px 4px;color:var(--muted)">${t}</td><td colspan="4" style="padding:3px 4px;color:var(--muted)">—</td>`;
         }
@@ -2081,6 +2089,50 @@ let mlTerminalPredictions = {total:0, acertos:0};
 // [NOVO] Rastreamento do 3º candidato (Reforço Estrutural) - top 3 terminais por probabilidade
 let estruturalCallLog = [];
 let estruturalPredictions = {total:0, acertos:0};
+// [NOVO] Candidato "Quebra de Número" - quando um número quebra (atraso>=50), aposta que o
+// terminal seguinte repete o terminal que veio depois da ÚLTIMA quebra desse MESMO número.
+// Validado: 15,0% vs 10% esperado, n=2.850, p<0,0001 (agregado, sem escolher número a dedo).
+const QUEBRA_LIMIAR = 50;
+let ultimoTerminalAposQuebra = {}; // {numero: terminal} - terminal que veio logo apos a ULTIMA quebra desse numero
+let numeroQuebrouGiroAnterior = null; // rastreia entre chamadas pra saber o terminal seguinte a uma quebra
+let quebraPendente = null; // {terminalEsperado} - palpite aguardando resolucao no proximo giro
+let quebraCallLog = [];
+let quebraPredictions = {total:0, acertos:0};
+
+function atualizarCandidatoQuebra(novoNumero){
+    const tRealAgora = terminalDig(novoNumero);
+
+    // 1. Se um numero quebrou no giro ANTERIOR, o terminal de AGORA e' o que vem logo apos essa quebra
+    if(numeroQuebrouGiroAnterior !== null){
+        ultimoTerminalAposQuebra[numeroQuebrouGiroAnterior] = tRealAgora;
+        numeroQuebrouGiroAnterior = null;
+    }
+
+    // 2. Resolve o palpite pendente (feito no giro anterior) contra o numero de agora
+    if(quebraPendente){
+        const hit = tRealAgora === quebraPendente.terminalEsperado;
+        quebraPredictions.total++;
+        if(hit) quebraPredictions.acertos++;
+        quebraCallLog.push({pacote:[quebraPendente.terminalEsperado], real:tRealAgora, acerto:hit});
+        if(quebraCallLog.length>200) quebraCallLog = quebraCallLog.slice(-200);
+        quebraPendente = null;
+    }
+
+    // 3. Verifica se o numero que ACABOU de sair (novoNumero) e' uma quebra (atraso>=50 antes dele)
+    const histAntes = historicoTotal.slice(1);
+    let atraso=0;
+    for(let i=0;i<histAntes.length && i<200;i++){
+        if(histAntes[i]===novoNumero) break;
+        atraso++;
+    }
+    if(atraso >= QUEBRA_LIMIAR){
+        numeroQuebrouGiroAnterior = novoNumero;
+        if(ultimoTerminalAposQuebra[novoNumero] !== undefined){
+            quebraPendente = {terminalEsperado: ultimoTerminalAposQuebra[novoNumero]};
+        }
+    }
+}
+
 // [NOVO] Rastreamento da CALL OFICIAL DO TORNEIO (a combinação final dos 3 candidatos)
 let torneioCallLog = [];
 let torneioPredictions = {total:0, acertos:0};
@@ -2268,71 +2320,23 @@ function renderTerminalRadar(sTrend){
         return;
     }
 
-    // [NOVO] TORNEIO - call oficial, no topo, com sequencia G/R (mais importante que %)
-    let html = '';
+    // [SIMPLIFICADO] 1 call só, compacta. Os 3 motores (EWMA/CUSUM, ML 3/5/7, Estrutural)
+    // continuam rodando e acumulando assertividade por baixo - só não aparecem mais como
+    // painéis separados na tela. rodarTorneioTerminal() já decide sozinho qual está com
+    // melhor desempenho comprovado agora e devolve só esse.
     const resultadoTorneio = rodarTorneioTerminal();
-    html += `<div style="padding:6px;background:rgba(201,169,97,0.08);border:1px solid var(--gold);border-radius:4px;margin-bottom:8px">`;
-    html += `<div style="font-size:9px;color:var(--gold);font-weight:600;margin-bottom:3px">🏆 CALL DO TORNEIO</div>`;
+    let html = `<div style="padding:6px;background:rgba(201,169,97,0.08);border:1px solid var(--gold);border-radius:4px">`;
     if(resultadoTorneio.vencedor){
-        html += `<div class="stat-row"><span class="stat-label">Vence: ${resultadoTorneio.vencedor}</span><span class="stat-value" style="color:var(--jade)">${resultadoTorneio.indicador||''} ${resultadoTorneio.pacote.map(t=>'T'+t).join('+')}</span></div>`;
-        html += `<div style="font-size:8px;color:var(--muted);margin-top:2px">Aprovados no portão: ${resultadoTorneio.ativos.join(', ')}</div>`;
+        html += `<div class="stat-row"><span class="stat-label">${resultadoTorneio.vencedor}</span><span class="stat-value" style="color:var(--jade);font-weight:700">${resultadoTorneio.indicador||''} ${resultadoTorneio.pacote.map(t=>'T'+t).join('+')}</span></div>`;
     }else{
-        html += `<div class="empty-msg" style="font-size:10px">Silêncio - nenhum candidato passou no portão de edge real agora</div>`;
+        html += `<div class="empty-msg" style="font-size:10px">Silêncio - nenhum motor com edge comprovado agora</div>`;
     }
     if(torneioCallLog.length>0){
         const pctT = Math.round(torneioPredictions.acertos/torneioPredictions.total*100);
         const maiorR = maiorSequenciaR(torneioCallLog);
-        html += `<div style="margin-top:5px;font-family:var(--mono);font-size:13px;letter-spacing:1px">${sequenciaGR(torneioCallLog,20).replace(/G/g,'<span style="color:var(--jade)">G</span>').replace(/R/g,'<span style="color:var(--crimson)">R</span>')}</div>`;
-        html += `<div style="font-size:8px;color:var(--muted);margin-top:2px">${pctT}% (${torneioPredictions.acertos}/${torneioPredictions.total}) • maior sequência de R: ${maiorR}${resultadoTorneio.indicador ? ' • '+resultadoTorneio.indicador+' agora' : ''}</div>`;
+        html += `<div class="accuracy-box" style="margin-top:6px">Assertividade: <strong>${pctT}%</strong> (${torneioPredictions.acertos}/${torneioPredictions.total}) • maior R: ${maiorR}${bolinhasHTML(torneioCallLog)}</div>`;
     }
     html += `</div>`;
-
-    // ranking por EWMA (temperatura continua)
-    const ranking = Object.keys(ewmaTerminais).map(t=>({t:parseInt(t), ewma:ewmaTerminais[t]}))
-        .sort((a,b)=>b.ewma-a.ewma);
-
-    html += '<div style="font-size:9px;color:var(--muted);margin-bottom:5px">EWMA por terminal (mais quente primeiro)</div>';
-    ranking.slice(0,4).forEach(r=>{
-        const quente = terminaisQuentes[r.t]!==undefined && (totalGirosProcessados - terminaisQuentes[r.t]) <= 15;
-        const reforco = quente ? verificarReforcoEstrutural(r.t, sTrend) : null;
-        const corTxt = r.ewma > 0.15 ? 'var(--gold)' : 'var(--muted)';
-        html += `<div class="stat-row"><span class="stat-label">T${r.t}${quente?' 🔥':''}</span><span class="stat-value" style="color:${corTxt}">${(r.ewma*100).toFixed(1)}%${reforco?` <span style="color:var(--jade)" title="Reforço estrutural confirmado">✓${reforco}</span>`:''}</span></div>`;
-    });
-    if(terminalRadarPredictions.total>0){
-        const pct = Math.round(terminalRadarPredictions.acertos/terminalRadarPredictions.total*100);
-        html += `<div class="accuracy-box" style="margin-top:6px">Assertividade (pacote de 4): <strong>${pct}%</strong> (${terminalRadarPredictions.acertos}/${terminalRadarPredictions.total}) base ~40%${bolinhasHTML(terminalRadarCallLog)}</div>`;
-    }
-
-    // [NOVO] Call do modelo ML (janelas 3/5/7) - separado do EWMA/CUSUM, validado offline
-    // com 32,8% real vs 30% esperado (top-3), p<0.0001 em 11k giros.
-    if(historicoTotal.length>=7){
-        const rankingML = preverModeloTerminal(historicoTotal);
-        const top3ML = rankingML.slice(0,3);
-        html += `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">`;
-        html += `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">📊 Candidato ML 3/5/7 (referência, não é a call)</div>`;
-        html += `<div class="stat-row"><span class="stat-label">Top 3</span><span class="stat-value" style="color:var(--muted)">${top3ML.map(r=>'T'+r.t).join('+')}</span></div>`;
-        if(mlTerminalPredictions.total>0){
-            const pctML = Math.round(mlTerminalPredictions.acertos/mlTerminalPredictions.total*100);
-            html += `<div class="accuracy-box" style="margin-top:4px">Assertividade: <strong>${pctML}%</strong> (${mlTerminalPredictions.acertos}/${mlTerminalPredictions.total}) base ~30%${bolinhasHTML(mlTerminalCallLog)}</div>`;
-        }
-        html += `</div>`;
-    }
-
-    // [NOVO] Call do Reforço Estrutural - 3º candidato do torneio
-    if(modeloEstrutural){
-        const rankingEstrut = [0,1,2,3,4,5,6,7,8,9].map(t=>({t, prob:preverModeloEstrutural(t, historicoTotal, sTrend)})).sort((a,b)=>b.prob-a.prob);
-        const top3Estrut = rankingEstrut.slice(0,3);
-        html += `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">`;
-        html += `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">📊 Candidato Estrutural (referência, não é a call)</div>`;
-        html += `<div class="stat-row"><span class="stat-label">Top 3</span><span class="stat-value" style="color:var(--muted)">${top3Estrut.map(r=>'T'+r.t).join('+')}</span></div>`;
-        if(estruturalPredictions.total>0){
-            const pctEstrut = Math.round(estruturalPredictions.acertos/estruturalPredictions.total*100);
-            html += `<div class="accuracy-box" style="margin-top:4px">Assertividade: <strong>${pctEstrut}%</strong> (${estruturalPredictions.acertos}/${estruturalPredictions.total}) base ~30%${bolinhasHTML(estruturalCallLog)}</div>`;
-        }
-        html += `</div>`;
-    }else{
-        html += `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)"><div class="empty-msg" style="font-size:9px">Modelo Estrutural ainda não treinado - clique 🧠 Retreinar</div></div>`;
-    }
 
     div.innerHTML = html;
 }
@@ -3643,6 +3647,7 @@ function coletarEstado(){
         ewmaTerminais, cusumTerminais, terminaisQuentes,
         mlTerminalCallLog, mlTerminalPredictions,
         estruturalCallLog, estruturalPredictions,
+        ultimoTerminalAposQuebra, numeroQuebrouGiroAnterior, quebraPendente, quebraCallLog, quebraPredictions,
         torneioCallLog, torneioPredictions,
         terminalRadarCallLog, terminalRadarPredictions
     };
@@ -3702,6 +3707,11 @@ function aplicarEstado(s){
         mlTerminalPredictions = s.mlTerminalPredictions || {total:0, acertos:0};
         estruturalCallLog = s.estruturalCallLog || [];
         estruturalPredictions = s.estruturalPredictions || {total:0, acertos:0};
+        ultimoTerminalAposQuebra = s.ultimoTerminalAposQuebra || {};
+        numeroQuebrouGiroAnterior = (s.numeroQuebrouGiroAnterior!==undefined) ? s.numeroQuebrouGiroAnterior : null;
+        quebraPendente = s.quebraPendente || null;
+        quebraCallLog = s.quebraCallLog || [];
+        quebraPredictions = s.quebraPredictions || {total:0, acertos:0};
         torneioCallLog = s.torneioCallLog || [];
         torneioPredictions = s.torneioPredictions || {total:0, acertos:0};
         terminalRadarCallLog = s.terminalRadarCallLog || [];
@@ -4277,6 +4287,11 @@ mlTerminalCallLog = [];
 mlTerminalPredictions = {total:0, acertos:0};
 estruturalCallLog = [];
 estruturalPredictions = {total:0, acertos:0};
+ultimoTerminalAposQuebra = {};
+numeroQuebrouGiroAnterior = null;
+quebraPendente = null;
+quebraCallLog = [];
+quebraPredictions = {total:0, acertos:0};
 torneioCallLog = [];
 torneioPredictions = {total:0, acertos:0};
 // [CORRIGIDO] o estado (EWMA/CUSUM) já resetava certo, mas a TELA do Terminal Radar não
@@ -4358,3 +4373,4 @@ if(estadoRestaurado && historicoTotal.length>0){
 </script>
 </body>
 </html>
+
