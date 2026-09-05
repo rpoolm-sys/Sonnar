@@ -95,8 +95,11 @@ function __processarGiro(n){
 
 // [NOVO] Sem isso, modeloEstrutural fica null pra sempre e o candidato Estrutural nunca
 // entra em jogo (estruturalCallLog ficaria vazio, sem cobertura nenhuma nesse teste).
-// Mesma metodologia do experiments/teste_fix_vazamento_torneio.js: warmup + retreino por fold.
-const N_FOLDS = 15;
+// Mesma metodologia do experiments/teste_fix_vazamento_torneio.js (warmup + retreino por
+// fold), mas com menos folds - esse teste so precisa EXERCITAR o candidato Estrutural pra
+// checar vazamento de ordem, nao medir acuracia com rigor estatistico (isso ja foi validado
+// separadamente). Menos folds = bem mais rapido, mesma cobertura de codigo.
+const N_FOLDS = 3;
 const WARMUP = 1000;
 const foldSize = Math.floor((__dataset.length - WARMUP) / N_FOLDS);
 
