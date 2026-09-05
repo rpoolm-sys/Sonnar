@@ -189,6 +189,7 @@ button:hover{opacity:.85}
 <button class="btn-report" onclick="abrirRelatorio()">Relatório</button>
 <button class="btn-report" onclick="abrirBuscaGatilhos()" style="background:#6a4c8a">🔬 Busca Gatilhos</button>
 <button class="btn-reset" onclick="resetarTudo()">Reset</button>
+<button onclick="desfazerUltimaEntrada()" style="font-size:10px;padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--ink);cursor:pointer" title="Desfaz o último número (ou lote) digitado">↩️ Desfazer</button>
 <!-- [NOVO] Arquivo permanente - contador + exportar. Sobrevive ao Reset (chave separada do
      localStorage) - guarda TODO giro já inserido, de todas as sessões, sem limite. -->
 <span style="font-size:10px;align-self:center;margin-left:10px;padding:3px 7px;background:rgba(201,169,97,0.08);border:1px solid var(--border);border-radius:4px" title="Giros guardados permanentemente, mesmo depois de Reset">📦 <strong id="arquivoPermanenteContador">0</strong> giros arquivados</span>
@@ -212,6 +213,8 @@ button:hover{opacity:.85}
     <div id="compactoUltimos"></div>
     <div id="compactoQuebraAlerta"></div>
     <div id="compactoLinhas"></div>
+    <div id="compactoOndas" style="margin-top:4px"></div>
+    <div id="compactoSucessores" style="margin-top:12px;margin-bottom:20px"></div>
 </div>
 
 <div class="tier-label first"><span class="txt">明 T123 Tracker</span><span class="rule"></span></div>
@@ -276,6 +279,8 @@ button:hover{opacity:.85}
 <h3 style="margin:0 0 6px">🎯 Sniper</h3>
 <div class="sniper-title" id="sniperTitle">EWMA Alinhado (Col+DZ+Terminal > 70%)</div>
 <div id="sniperNumeros" class="sniper-numbers"><div class="no-signal">Aguardando convergência...</div></div>
+<div id="sniperReforcoSetor"></div>
+<div id="termometroAoVivo" style="margin-top:6px"></div>
 <div id="sniperBolinhas" class="bolinhas-row"></div>
 </div>
 <!-- [NOVO] Painel "Ondas" - versão ao vivo da Busca Gatilhos, roda a cada giro (nao precisa
@@ -299,6 +304,11 @@ button:hover{opacity:.85}
 <h3>🔑 Trigger</h3>
 <div id="infoParidade" style="margin-bottom:6px"></div>
 <div id="binariosContent"><div class="empty-msg">Aguardando dados...</div></div>
+<!-- [NOVO] Painel de Sucessores Historicos - dentro do mesmo box do Trigger (tinha espaco
+     sobrando), separado por uma divisoria. Puramente informativo, sem call, sem previsao. -->
+<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">
+<div id="sucessoresHistoricos"><div class="empty-msg" style="font-size:10px">Aguardando dados...</div></div>
+</div>
 </div>
 
 <!-- Diagonal - mesma largura/posicao do box acima, uma linha abaixo -->
@@ -2023,28 +2033,49 @@ function retreinarModeloEstrutural(callbackProgresso){
     const negEmbaralhado = neg.sort(()=>Math.random()-0.5).slice(0, pos.length);
     const treinoBalanceado = pos.concat(negEmbaralhado).sort(()=>Math.random()-0.5);
 
-    const modelo = criarModeloNovo();
-    const EPOCAS = 30, TAXA = 0.05;
-    for(let ep=0; ep<EPOCAS; ep++){
-        for(const ex of treinoBalanceado){
-            treinarPassoEstrutural(modelo, ex.feat, ex.label, TAXA);
+    // [CORRIGIDO] Gate anti-colapso - a rede pequena tem ~25% de chance da inicialização
+    // aleatória cair num mínimo local ruim, produzindo valAcc ~33-34% (pior que o esperado
+    // ~68-69%) que antes era salvo silenciosamente, sem aviso. Agora tenta até 3 vezes,
+    // descartando qualquer resultado com valAcc < 0.5 automaticamente.
+    const MAX_TENTATIVAS = 3;
+    let melhorModelo = null, melhorValAcc = -1, tentativasFeitas = 0;
+
+    for(let tentativa=1; tentativa<=MAX_TENTATIVAS; tentativa++){
+        tentativasFeitas = tentativa;
+        const modeloTentativa = criarModeloNovo();
+        const EPOCAS = 30, TAXA = 0.05;
+        for(let ep=0; ep<EPOCAS; ep++){
+            for(const ex of treinoBalanceado){
+                treinarPassoEstrutural(modeloTentativa, ex.feat, ex.label, TAXA);
+            }
+            if(callbackProgresso) callbackProgresso(ep+1, EPOCAS, tentativa, MAX_TENTATIVAS);
         }
-        if(callbackProgresso) callbackProgresso(ep+1, EPOCAS);
+
+        let acertos=0;
+        for(const ex of val){
+            const pred = forwardEstrutural(modeloTentativa, ex.feat).saida >= 0.5 ? 1 : 0;
+            if(pred===ex.label) acertos++;
+        }
+        const valAccTentativa = acertos/val.length;
+
+        if(valAccTentativa > melhorValAcc){
+            melhorValAcc = valAccTentativa;
+            melhorModelo = modeloTentativa;
+        }
+        // se saiu saudavel (>=50%), nao precisa tentar de novo
+        if(valAccTentativa >= 0.5) break;
     }
 
-    // valida
-    let acertos=0;
-    for(const ex of val){
-        const pred = forwardEstrutural(modelo, ex.feat).saida >= 0.5 ? 1 : 0;
-        if(pred===ex.label) acertos++;
-    }
-    const valAcc = acertos/val.length;
+    const modelo = melhorModelo;
+    const valAcc = melhorValAcc;
+    const colapsouAlgumaVez = tentativasFeitas > 1;
+    const aindaColapsado = valAcc < 0.5; // raro (~1.6% com 3 tentativas), mas pode acontecer
 
-    modelo.metadados = {treinadoEm: new Date().toISOString(), giros: seq.length, valAcc, exemplos: exemplos.length};
+    modelo.metadados = {treinadoEm: new Date().toISOString(), giros: seq.length, valAcc, exemplos: exemplos.length, tentativas: tentativasFeitas};
     modeloEstrutural = modelo;
     salvarModeloEstrutural();
 
-    return {sucesso:true, valAcc, exemplos: exemplos.length, giros: seq.length};
+    return {sucesso:true, valAcc, exemplos: exemplos.length, giros: seq.length, tentativas: tentativasFeitas, colapsouAlgumaVez, aindaColapsado};
 }
 
 // ============================================================================
@@ -2087,6 +2118,51 @@ function linhaCompacta(nome, callTexto, log, predictions, indicador){
     </div>`;
 }
 
+// ============================================================================
+// [NOVO] Painel "Sucessores Históricos" - toda vez que um número sai, mostra o que veio
+// logo depois dele nas últimas 7 vezes que apareceu no arquivo permanente (11k+ giros).
+// Puramente informativo/consulta - NÃO é previsão, NÃO alimenta nenhum motor, NÃO gera
+// call. Só te dá o dado bruto pra você julgar com os próprios olhos.
+// ============================================================================
+function buscarSucessoresHistoricos(numeroAtual, qtd){
+    qtd = qtd || 7;
+    // usa o arquivo permanente (nao reseta, tem os 11k+ giros) - procura de tras pra
+    // frente (mais recente primeiro), ignorando a ocorrencia mais recente (que é o
+    // proprio giro atual, ja incluido no arquivo permanente pelo registrarNoArquivoPermanente)
+    const seq = historicoArquivoPermanente.map(x=>x.n);
+    const sucessores = [];
+    // seq está em ordem cronológica (mais antigo primeiro) - percorre de tras pra frente,
+    // pulando a ultima posicao (que é o giro atual)
+    for(let i=seq.length-2; i>=0 && sucessores.length<qtd; i--){
+        if(seq[i]===numeroAtual && i+1<seq.length){
+            sucessores.push(seq[i+1]);
+        }
+    }
+    return sucessores; // mais recente primeiro
+}
+
+function renderSucessoresHistoricos(numeroAtual){
+    const div = document.getElementById('sucessoresHistoricos');
+    if(!div) return;
+    if(historicoArquivoPermanente.length<20){
+        div.innerHTML = '<div class="empty-msg" style="font-size:10px">Aguardando mais histórico no arquivo permanente...</div>';
+        return;
+    }
+    const sucessores = buscarSucessoresHistoricos(numeroAtual, 7);
+    if(sucessores.length===0){
+        div.innerHTML = `<div class="empty-msg" style="font-size:10px">Número ${numeroAtual} ainda não tem histórico suficiente</div>`;
+        return;
+    }
+    const corTexto = {red:'var(--crimson)', black:'#ccc', green:'var(--jade)'};
+    let html = `<div style="font-size:9px;color:var(--muted);margin-bottom:4px">Sucessores históricos do ${numeroAtual} (últimas ${sucessores.length}x, arquivo permanente)</div>`;
+    html += '<div style="display:flex;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:14px;font-weight:700">';
+    sucessores.forEach(num=>{
+        html += `<span style="color:${corTexto[getCor(num)]}">${num}<span style="color:var(--muted);font-size:9px;font-weight:400">(T${terminalDig(num)})</span></span>`;
+    });
+    html += '</div>';
+    div.innerHTML = html;
+}
+
 function renderModoCompacto(sTrend, sniper, sTrigger){
     if(!modoCompactoAtivo) return;
 
@@ -2121,28 +2197,33 @@ function renderModoCompacto(sTrend, sniper, sTrigger){
     if(!div) return;
     let html = '';
 
-    // Trend (DZ + Col juntos numa linha so, se tiver os dois)
-    if(sTrend && (sTrend.parDuz.length>0 || sTrend.parCol.length>0)){
-        const txt = [sTrend.parDuz.length?'DZ'+sTrend.parDuz.join('+DZ'):'', sTrend.parCol.length?'Col'+sTrend.parCol.join('+Col'):''].filter(Boolean).join(' + ');
-        const logComb = trendCallLog.slice(-50); // combinado DZ+Col pra bolinhas
-        const predComb = {total: trendDuzPredictions.total+trendColPredictions.total, acertos: trendDuzPredictions.acertos+trendColPredictions.acertos};
-        html += linhaCompacta('Trend', txt, logComb, predComb, null);
+    // [SEPARADO] Trend agora em 2 linhas independentes - Dúzia e Coluna, cada uma com sua
+    // própria assertividade (antes vinha junto numa linha só, misturando os dois placares).
+    if(sTrend && sTrend.parDuz.length>0){
+        const logDuz = trendCallLog.filter(c=>c.tipo==='DZ').slice(-50);
+        html += linhaCompacta('Trend-DZ', 'DZ'+sTrend.parDuz.join('+DZ'), logDuz, trendDuzPredictions, null);
     } else {
-        html += linhaCompacta('Trend', 'Sem call', [], {total:0,acertos:0}, null);
+        html += linhaCompacta('Trend-DZ', 'Sem call', [], trendDuzPredictions, null);
+    }
+    if(sTrend && sTrend.parCol.length>0){
+        const logCol = trendCallLog.filter(c=>c.tipo==='Col').slice(-50);
+        html += linhaCompacta('Trend-Col', 'Col'+sTrend.parCol.join('+Col'), logCol, trendColPredictions, null);
+    } else {
+        html += linhaCompacta('Trend-Col', 'Sem call', [], trendColPredictions, null);
     }
 
     // Sniper
     if(sniper && sniper.numeros && sniper.numeros.length>0){
         html += linhaCompacta('Sniper', sniper.numeros.map(n=>n).join(','), sniperCallLog, sniperPredictions, null);
     } else {
-        html += linhaCompacta('Sniper', 'Sem call', [], {total:0,acertos:0}, null);
+        html += linhaCompacta('Sniper', 'Sem call', [], sniperPredictions, null);
     }
 
     // Trigger
     if(sTrigger && sTrigger.label){
         html += linhaCompacta('Trigger', sTrigger.label, chavePromissoraCallLog, chavePromissoraPredictions, null);
     } else {
-        html += linhaCompacta('Trigger', 'Sem call', [], {total:0,acertos:0}, null);
+        html += linhaCompacta('Trigger', 'Sem call', [], chavePromissoraPredictions, null);
     }
 
     // Terminal Radar (torneio)
@@ -2151,10 +2232,30 @@ function renderModoCompacto(sTrend, sniper, sTrigger){
         const txt = `${resultadoTorneio.vencedor}: ${resultadoTorneio.pacote.map(t=>'T'+t).join('+')}`;
         html += linhaCompacta('Terminal', txt, torneioCallLog, torneioPredictions, resultadoTorneio.indicador);
     } else {
-        html += linhaCompacta('Terminal', 'Silêncio', [], {total:0,acertos:0}, null);
+        html += linhaCompacta('Terminal', 'Silêncio', [], torneioPredictions, null);
     }
 
     div.innerHTML = html;
+
+    // [NOVO] Seção de Ondas Ativas - reaproveita o painel que já existe (setor CUSUM,
+    // repetição de repetição, zero na coluna, etc), só copia o HTML já gerado pra cá.
+    // Tem espaço sobrando no modo compacto, não precisa resumir mais que isso.
+    const divOndas = document.getElementById('compactoOndas');
+    if(divOndas){
+        const ondasOriginal = document.getElementById('ondasContent');
+        const temConteudo = ondasOriginal && ondasOriginal.innerHTML && !ondasOriginal.innerHTML.includes('no-signal');
+        divOndas.innerHTML = `<div style="font-size:9px;color:var(--muted);margin:8px 0 4px 0;border-top:1px solid var(--border);padding-top:8px">🌊 ONDAS ATIVAS</div>` +
+            (temConteudo ? ondasOriginal.innerHTML : '<div class="empty-msg" style="font-size:10px">Nenhuma onda ativa agora</div>');
+    }
+
+    // [NOVO] Seção de Sucessores Históricos - mesmo conteúdo do painel original, copiado
+    // pra cá pra não precisar sair do Modo Compacto pra ver essa informação.
+    const divSucessoresCompacto = document.getElementById('compactoSucessores');
+    if(divSucessoresCompacto){
+        const sucessoresOriginal = document.getElementById('sucessoresHistoricos');
+        divSucessoresCompacto.innerHTML = `<div style="font-size:9px;color:var(--muted);margin:8px 0 4px 0;border-top:1px solid var(--border);padding-top:8px">🔍 SUCESSORES HISTÓRICOS</div>` +
+            (sucessoresOriginal ? sucessoresOriginal.innerHTML : '');
+    }
 }
 
 function acionarRetreino(){
@@ -2171,7 +2272,12 @@ function acionarRetreino(){
         const resultado = retreinarModeloEstrutural();
         if(resultado.sucesso){
             statusEl.textContent = `✓ Treinado (${resultado.giros}g, val=${(resultado.valAcc*100).toFixed(0)}%)`;
-            alert('Retreino concluído!\n\nGiros usados: '+resultado.giros+'\nExemplos gerados: '+resultado.exemplos+'\nAcurácia de validação: '+(resultado.valAcc*100).toFixed(1)+'%');
+            const avisoColapso = resultado.aindaColapsado
+                ? '\n\n🚨 ATENÇÃO: as 3 tentativas colapsaram (raro, ~1,6% de chance) - esse modelo está com validação BAIXA ('+(resultado.valAcc*100).toFixed(0)+'%). Recomendo clicar em Retreinar de novo antes de confiar no Estrutural.'
+                : (resultado.colapsouAlgumaVez
+                    ? '\n\n⚠️ A primeira tentativa colapsou (inicialização ruim) - tentou de novo automaticamente até sair um modelo saudável.'
+                    : '');
+            alert('Retreino concluído!\n\nGiros usados: '+resultado.giros+'\nExemplos gerados: '+resultado.exemplos+'\nAcurácia de validação: '+(resultado.valAcc*100).toFixed(1)+'%\nTentativas: '+resultado.tentativas+avisoColapso);
         }else{
             statusEl.textContent = '✗ Falhou';
             alert('Não foi possível retreinar: '+resultado.motivo);
@@ -2218,6 +2324,127 @@ let numeroQuebrouGiroAnterior = null; // rastreia entre chamadas pra saber o ter
 let quebraPendente = null; // {terminalEsperado} - palpite aguardando resolucao no proximo giro
 let quebraCallLog = [];
 let quebraPredictions = {total:0, acertos:0};
+
+// ============================================================================
+// [NOVO] Termômetro ao Vivo - "onda momentânea", SEM validação estatística nenhuma. Só
+// mostra o resultado bruto recente de um padrão específico (par de mesmo número -> terminal
+// na 5ª casa depois), pra quem quiser "surfar" um padrão que está batendo agora na sessão,
+// mesmo sem confirmação de longo prazo. Não vira call, não afeta nenhum motor.
+// ============================================================================
+const TERMOMETRO_PACOTE = new Set([1,2,3,4,5,6]); // atualizado - Ricardo mudou pra T1-T6
+let termometroPendentes = []; // [{posicaoAlvo, resolvido}] - pares aguardando chegar na 5a casa
+let termometroLog = []; // ultimos resultados brutos (true/false), sem peso estatistico
+
+function atualizarTermometroAoVivo(novoNumero){
+    // resolve pendencias que chegaram na 5a casa agora
+    termometroPendentes = termometroPendentes.filter(p => {
+        p.restam--;
+        if(p.restam===0){
+            const hit = TERMOMETRO_PACOTE.has(terminalDig(novoNumero));
+            termometroLog.push({hit, comTrend: p.trendOk});
+            if(termometroLog.length>20) termometroLog = termometroLog.slice(-20);
+            return false;
+        }
+        return true;
+    });
+
+    // detecta novo par (numero atual == anterior) e agenda a checagem pra daqui 5 giros
+    if(historicoTotal.length>=2 && historicoTotal[1]===novoNumero){
+        termometroPendentes.push({restam:5, trendOk:null});
+    }
+
+    // [NOVO] Sinal combinado - quando falta so 1 giro pra completar a 5a casa (ou seja, o
+    // PROXIMO giro e o momento de apostar), checa se o Trend (DZ ou Col) esta com EWMA >70%
+    // AGORA - se sim, marca esse pendente como "reforcado pelo Trend".
+    const ewmaCol = janelaEEwma(trendCallLog.filter(c=>c.tipo==='Col')).pctEwma;
+    const ewmaDuz = janelaEEwma(trendCallLog.filter(c=>c.tipo==='DZ')).pctEwma;
+    const trendForte = (ewmaCol!==null && ewmaCol>0.70) || (ewmaDuz!==null && ewmaDuz>0.70);
+    termometroPendentes.forEach(p => {
+        if(p.restam===1 && p.trendOk===null) p.trendOk = trendForte;
+    });
+}
+
+function renderTermometroAoVivo(){
+    const div = document.getElementById('termometroAoVivo');
+    if(!div) return;
+    if(termometroLog.length===0){
+        div.innerHTML = '<div class="empty-msg" style="font-size:9px">Aguardando pares nessa sessão...</div>';
+        return;
+    }
+    const ultimos = termometroLog.slice(-10);
+    const acertos = ultimos.filter(x=>x.hit).length;
+    const bolinhas = ultimos.map(r => `<span class="bolinha ${r.hit?'green':'red'}"></span>`).join('');
+
+    // assertividade separada: quando o Trend tambem estava >70% na hora da aposta
+    const comTrend = termometroLog.filter(r=>r.comTrend===true);
+    const acertosComTrend = comTrend.filter(r=>r.hit).length;
+    const linhaCombinada = comTrend.length>0
+        ? `<div style="font-size:9px;color:var(--jade);margin-top:2px">✅ Quando o Trend também estava >70%: ${acertosComTrend}/${comTrend.length} = ${(acertosComTrend/comTrend.length*100).toFixed(0)}%</div>`
+        : '';
+
+    div.innerHTML = `<div style="font-size:9px;color:var(--muted)">🌡️ Onda ao vivo (par→T1-T6 na 5ª casa, sem validação - só o que está batendo agora)</div>
+        <div style="margin-top:2px">${bolinhas} <span style="font-size:9px;color:var(--gold)">${acertos}/${ultimos.length}</span></div>${linhaCombinada}`;
+}
+
+// ============================================================================
+// [NOVO] Candidato Residual - escaneamento adaptativo de posição, validado com rigor:
+// pra qualquer número que já tenha 7+ ocorrências no arquivo permanente, olha os 7
+// sucessores anteriores, e aposta no terminal da POSIÇÃO que está mais forte AGORA (não
+// fixa, recalculada a cada giro usando os últimos 200 casos resolvidos - a posição "vencedora"
+// roda com o tempo, confirmado real). Validado: 12,2% vs 10% esperado, confirmado em 2
+// metades de tempo (11,1% e 13,4%), testado de forma adaptativa (sem vazamento, sem viés
+// de garimpagem - decide a posição usando só o passado, aposta pro futuro).
+// ============================================================================
+const RESIDUAL_JANELA_ADAPTATIVA = 200;
+let residualPosicaoLog = []; // {pos, hit} dos ultimos casos resolvidos, pra escolher a melhor posicao
+let residualPendente = null; // {numeroGatilho, posEscolhida, terminalPrevisto}
+let residualCallLog = [];
+let residualPredictions = {total:0, acertos:0};
+
+function melhorPosicaoResidualAgora(){
+    if(residualPosicaoLog.length < 20) return [0,1,2,3]; // aquecimento minimo - top4 padrao
+    const janela = residualPosicaoLog.slice(-RESIDUAL_JANELA_ADAPTATIVA);
+    const taxas = [0,1,2,3,4,5,6].map(p=>{
+        const doPos = janela.filter(r=>r.pos===p);
+        return {pos:p, taxa: doPos.length>0 ? doPos.filter(r=>r.hit).length/doPos.length : 0};
+    });
+    taxas.sort((a,b)=>b.taxa-a.taxa);
+    return taxas.slice(0,4).map(x=>x.pos);
+}
+
+function atualizarCandidatoResidual(novoNumero){
+    const tRealAgora = terminalDig(novoNumero);
+
+    // 1. Resolve o palpite pendente (feito na ocorrencia anterior desse mesmo gatilho)
+    if(residualPendente){
+        const hit = residualPendente.terminaisPrevistos.includes(tRealAgora);
+        residualPredictions.total++;
+        if(hit) residualPredictions.acertos++;
+        residualCallLog.push({top3:residualPendente.terminaisPrevistos, real:tRealAgora, acerto:hit});
+        if(residualCallLog.length>200) residualCallLog = residualCallLog.slice(-200);
+        // registra CADA posicao usada nesse palpite, pra atualizar a taxa adaptativa de cada uma
+        residualPendente.posicoesUsadas.forEach(pos=>{
+            const hitDessaPosicao = terminalDig(residualPendente.sucessoresAntes[pos])===tRealAgora;
+            residualPosicaoLog.push({pos, hit:hitDessaPosicao});
+        });
+        if(residualPosicaoLog.length>RESIDUAL_JANELA_ADAPTATIVA*8) residualPosicaoLog = residualPosicaoLog.slice(-RESIDUAL_JANELA_ADAPTATIVA*8);
+        residualPendente = null;
+    }
+
+    // 2. Busca os 7 sucessores anteriores desse numero (sem contar a ocorrencia de agora)
+    const seq = historicoArquivoPermanente.map(x=>x.n);
+    const sucessoresAntes = [];
+    for(let i=seq.length-2; i>=0 && sucessoresAntes.length<7; i--){
+        if(seq[i]===novoNumero && i+1<seq.length){
+            sucessoresAntes.push(seq[i+1]);
+        }
+    }
+    if(sucessoresAntes.length>=7){
+        const posicoesEscolhidas = melhorPosicaoResidualAgora();
+        const terminaisPrevistos = [...new Set(posicoesEscolhidas.map(p=>terminalDig(sucessoresAntes[p])))];
+        residualPendente = {posicoesUsadas:posicoesEscolhidas, terminaisPrevistos, sucessoresAntes};
+    }
+}
 
 function atualizarCandidatoQuebra(novoNumero){
     const tRealAgora = terminalDig(novoNumero);
@@ -2341,6 +2568,52 @@ function taxaJanelaRapida(log, tam){
     return recentes.filter(c=>c.acerto).length/recentes.length;
 }
 
+// ============================================================================
+// [NOVO] Reforço T5/T9 - dupla confirmação validada (não é candidato, não decide a call,
+// só reforça a confiança quando já bate com o que o torneio está apontando).
+// T5 (5,15,25,35) -> Alto/Baixo do sucessor converge: 54,2% vs 50%, p=0,002, replicado
+// em 2 metades de tempo (54,1%/54,9%).
+// T9 (9,19,29) -> Terminal do sucessor converge: 12,9% vs 10%, p=0,0018, replicado
+// em 2 metades (13,4%/12,5%).
+// ============================================================================
+function altoBaixo(n){
+    if(n===0) return 'zero';
+    return n<=18 ? 'baixo' : 'alto';
+}
+
+function modaSucessoresHistoricos(numeroGatilho, fn, qtd){
+    qtd = qtd || 7;
+    const seq = historicoArquivoPermanente.map(x=>x.n);
+    const valores = [];
+    // pula a posicao mais recente (giro atual), pega os sucessores das ocorrencias ANTERIORES
+    for(let i=seq.length-2; i>=0 && valores.length<qtd; i--){
+        if(seq[i]===numeroGatilho && i+1<seq.length){
+            valores.push(fn(seq[i+1]));
+        }
+    }
+    if(valores.length===0) return null;
+    const contagem = {};
+    valores.forEach(v=>contagem[v]=(contagem[v]||0)+1);
+    return Object.keys(contagem).reduce((a,b)=>contagem[a]>=contagem[b]?a:b);
+}
+
+function verificarReforcoT5T9(numeroAtual, pacoteVencedor){
+    // retorna true se o numero que acabou de sair for T5 ou T9, E a moda historica
+    // (calculada so com dados ANTERIORES a esse giro) bater com o pacote vencedor atual
+    if([5,15,25,35].includes(numeroAtual)){
+        const moda = modaSucessoresHistoricos(numeroAtual, altoBaixo, 7);
+        if(moda===null) return false;
+        // confere se o pacote vencedor aponta pra terminais ligados a esse lado (Alto/Baixo)
+        return pacoteVencedor.some(t => REFORCO_ESTRUTURAL[t] && REFORCO_ESTRUTURAL[t].altobaixo===moda);
+    }
+    if([9,19,29].includes(numeroAtual)){
+        const moda = modaSucessoresHistoricos(numeroAtual, terminalDig, 7);
+        if(moda===null) return false;
+        return pacoteVencedor.includes(parseInt(moda));
+    }
+    return false;
+}
+
 function rodarTorneioTerminal(){
     // [CORRIGIDO - VAZAMENTO DE DADO] Antes, os pacotes eram recalculados aqui do ZERO
     // (top4EWMA direto de ewmaTerminais, rankingML/rankingEstrutural direto de
@@ -2358,14 +2631,17 @@ function rodarTorneioTerminal(){
     const ewmaEntry = terminalRadarCallLog.length ? terminalRadarCallLog[terminalRadarCallLog.length-1] : null;
     const mlEntry = mlTerminalCallLog.length ? mlTerminalCallLog[mlTerminalCallLog.length-1] : null;
     const estrEntry = estruturalCallLog.length ? estruturalCallLog[estruturalCallLog.length-1] : null;
+    const residualEntry = residualCallLog.length ? residualCallLog[residualCallLog.length-1] : null;
     const top4EWMA = ewmaEntry ? ewmaEntry.pacote : [];
     const top3ML = mlEntry ? mlEntry.top3 : [];
     const top3Estrutural = estrEntry ? estrEntry.top3 : [];
+    const pacoteResidual = residualEntry ? residualEntry.top3 : [];
 
     const candidatos = [
         {nome:'EWMA/CUSUM', pacote:top4EWMA, log:terminalRadarCallLog, baseline:0.40},
         {nome:'ML 3/5/7',    pacote:top3ML,   log:mlTerminalCallLog,    baseline:0.30},
-        {nome:'Estrutural',  pacote:top3Estrutural, log:estruturalCallLog, baseline:0.30}
+        {nome:'Estrutural',  pacote:top3Estrutural, log:estruturalCallLog, baseline:0.30},
+        {nome:'Residual',    pacote:pacoteResidual, log:residualCallLog, baseline:0.40}
     ];
 
     // portao: EWMA geral de acerto precisa estar acima do baseline + margem
@@ -2386,20 +2662,48 @@ function rodarTorneioTerminal(){
         if(taxa > melhorTaxa){ melhor = aprovados[i]; melhorTaxa = taxa; }
     }
 
-    // [NOVO] Indicador combinado - validado com dado real: momentum>=90% da 84,9% de acerto
-    // (n=2843), 3 aprovados+momentum>=50% da ~86-89%, 2 aprovados ou momentum 50-90% fica no
-    // meio (~63%), 1 aprovado com momentum baixo e o pior caso (~40%).
+    // [CORRIGIDO - achado importante] Indicador combinado ANTIGO usava "momentum alto = mais
+    // confiança", calibrado quando o torneio ainda tinha o vazamento de dado (EWMA/CUSUM
+    // aparecendo com 99,8% de acerto). Depois da correção do vazamento, testamos a relação
+    // real: momentum ALTO na verdade prediz MENOS chance de acerto (reversão à média) - 75%
+    // de acerto com momentum baixo (0-30%) caindo pra 48% com momentum alto (90-100%),
+    // padrão monotônico confirmado em 2 metades de tempo independentes. A regra antiga tinha
+    // AUC=0,471 (pior que chute aleatório!) - substituída por regressão logística treinada
+    // nos dados reais (AUC=0,613), usando os mesmos 3 sinais (candidatos aprovados, momentum,
+    // qual motor venceu). Pesos: intercept=1.745, ativos=+0.262, momentum=-2.758,
+    // vencedor(EWMA=0/ML=1/Estrutural=2)=-0.500.
     const momentum = taxaJanelaRapida(torneioCallLog, TORNEIO_JANELA_RAPIDA);
+    const momentumParaModelo = momentum===null ? 0.57 : momentum; // 0.57 = media historica, usado so quando ainda nao ha dado suficiente
+    const vencedorCod = melhor.nome==='EWMA/CUSUM' ? 0 : (melhor.nome==='ML 3/5/7' ? 1 : 2);
+    const z = 1.745 + 0.262*aprovados.length + (-2.758)*momentumParaModelo + (-0.500)*vencedorCod;
+    const probabilidade = 1/(1+Math.exp(-z));
+
     let indicador = '🔴';
-    if(momentum!==null && momentum>=0.9){
-        indicador = '🔥';
-    }else if(aprovados.length===3 && (momentum===null || momentum>=0.5)){
-        indicador = '🟢';
-    }else if(aprovados.length===2 || (momentum!==null && momentum>=0.5 && momentum<0.9)){
-        indicador = '🟡';
+    if(probabilidade>=0.7) indicador = '🔥';
+    else if(probabilidade>=0.6) indicador = '🟢';
+    else if(probabilidade>=0.5) indicador = '🟡';
+
+    // [NOVO] Reforço T5/T9 - se o número que ACABOU de sair for 5/9/15/19/25/29/35 e a
+    // moda histórica bater com o pacote vencedor, sobe 1 nível no indicador (nunca desce,
+    // nunca decide sozinho quem vence - só reforça confiança já existente).
+    if(historicoTotal.length>0){
+        const reforcou = verificarReforcoT5T9(historicoTotal[0], melhor.pacote);
+        if(reforcou){
+            const escada = ['🔴','🟡','🟢','🔥'];
+            const posAtual = escada.indexOf(indicador);
+            if(posAtual>=0 && posAtual<escada.length-1) indicador = escada[posAtual+1];
+        }
     }
 
-    return {vencedor:melhor.nome, pacote:melhor.pacote, ativos:aprovados.map(c=>c.nome), indicador};
+    // [NOVO] Reforço Adaptativo pós-repetição de terminal - se a janela estiver ativa
+    // (disparada por CUSUM), adiciona o terminal atualmente mais forte (escaneamento
+    // adaptativo) ao pacote do vencedor, sem duplicar se já tiver.
+    let pacoteFinal = melhor.pacote;
+    if(reforcoContagemRegressiva > 0 && reforcoTerminalAlvo !== null && !pacoteFinal.includes(reforcoTerminalAlvo)){
+        pacoteFinal = [...pacoteFinal, reforcoTerminalAlvo];
+    }
+
+    return {vencedor:melhor.nome, pacote:pacoteFinal, ativos:aprovados.map(c=>c.nome), indicador, probabilidade, reforcoAtivo: reforcoContagemRegressiva>0 ? reforcoTerminalAlvo : null};
 }
 
 function atualizarEVerificarTorneio(novoNumero){
@@ -3074,6 +3378,9 @@ function executarSniperUnico(sTrend, sTrigger){
 const TREND_STREAK_LIMIAR = 3;   // erros seguidos pra pausar
 const TREND_STREAK_COOLDOWN = 5; // giros de pausa depois de acionar
 let trendStreakErro = {DZ:0, Col:0};
+// [NOVO] Contador de sequência boa no nível do giro (combina DZ+Col, igual foi validado no
+// teste do aviso DZ2 - "sequência boa" = pelo menos 1 dos 2 eixos acertou naquele giro).
+let trendSequenciaBoaAtual = 0;
 let trendPausaAte = {DZ:0, Col:0};
 
 // [NOVO] FILTRO DE CONTRADIÇÃO - checa se a categoria EXCLUÍDA da call está dominando a
@@ -3162,6 +3469,7 @@ const confirmadoTransicao = atualizarPersistenciaTransicao(sobreviventesTransica
 const sTrigger = chavePromissoraAtiva() || chavePromissoraAutomatica() || chavePromissoraTransicaoTerminal(confirmadoTransicao);
 lastTriggerSignal = sTrigger;
 atualizarUITrigger(sTrigger);
+if(historicoTotal.length>0) renderSucessoresHistoricos(historicoTotal[0]);
 
 const sParidade = analisarParidade();
 lastParidadeSignal = sParidade;
@@ -3169,6 +3477,10 @@ atualizarUIParidade(sParidade);
 
 // [NOVO] Terminal Radar - atualiza CUSUM/EWMA com o giro que ACABOU de sair (historicoTotal[0])
 if(historicoTotal.length>0) atualizarTerminalRadar(historicoTotal[0]);
+if(historicoTotal.length>0) atualizarCusumSetor(historicoTotal[0]);
+if(historicoTotal.length>0) atualizarCandidatoResidual(historicoTotal[0]);
+if(historicoTotal.length>0) atualizarTermometroAoVivo(historicoTotal[0]);
+if(historicoTotal.length>0) renderTermometroAoVivo();
 
 // [NOVO] Candidato Estrutural - verifica a previsao ANTES desse giro contra o real
 if(historicoTotal.length>0 && modeloEstrutural){
@@ -3189,6 +3501,7 @@ if(historicoTotal.length>0 && modeloEstrutural){
 let ultimoResultadoTorneio = null;
 if(historicoTotal.length>0){
     ultimoResultadoTorneio = atualizarEVerificarTorneio(historicoTotal[0]);
+    atualizarReforcoAdaptativo(historicoTotal[0]);
 }
 
 renderTerminalRadar(sTrend);
@@ -3233,14 +3546,125 @@ const bd = document.getElementById('sniperBolinhas');
 if(bd) bd.innerHTML = bolinhasHTML(sniperCallLog);
 }
 
+// ============================================================================
+// [NOVO] CUSUM de Setor - reforço de confiança pro Sniper. Validado: quando um setor
+// clássico (Voisins/Tiers/Orphelins) fica "quente" (CUSUM dispara), os OUTROS 2 setores
+// saem mais que o esperado depois - 69,2%/69,3% em 2 metades de tempo independentes,
+// p=0,006/0,004 (vs baseline ~63-65%). Parâmetros validados: K=0.02, H=1.5.
+// ============================================================================
+const SETOR_VOISINS = new Set([22,18,29,7,28,12,35,3,26,0,32,15,19,4,21,2,25]);
+const SETOR_TIERS = new Set([27,13,36,11,30,8,23,10,5,24,16,33]);
+const SETOR_ORPHELINS = new Set([17,34,6,1,20,14,31,9]);
+const SETORES_CUSUM = {Voisins:SETOR_VOISINS, Tiers:SETOR_TIERS, Orphelins:SETOR_ORPHELINS};
+const BASELINE_SETOR = {Voisins:17/37, Tiers:12/37, Orphelins:8/37};
+const SETOR_CUSUM_K = 0.02;
+const SETOR_CUSUM_H = 1.5;
+let setorCusumS = {Voisins:0, Tiers:0, Orphelins:0};
+let setorQuenteAgora = null; // nome do setor que acabou de disparar (null = nenhum)
+
+// ============================================================================
+// [NOVO] Reforço Adaptativo pós-repetição de terminal - versão final combinando 2 achados:
+// 1) CUSUM decide QUANDO reforçar - só quando a frequência de "terminal repete" estiver
+//    genuinamente acima do normal (validado: dispara em ~3,9% dos giros, não 95%).
+// 2) Escaneamento adaptativo decide QUAL terminal reforçar - usa os últimos 300 casos de
+//    "terminal repetiu" pra achar qual terminal está aparecendo mais forte AGORA em
+//    qualquer uma das 12 posições seguintes (validado: 79,2%/79,3% nas 2 metades de tempo,
+//    vs 71,8% esperado - bem mais forte que fixar em T0 sozinho, que dava 45,7%).
+// ============================================================================
+const REFORCO_JANELA_TERMINAL = 12; // quantos giros a janela de deteccao cobre
+const REFORCO_JANELA_ADAPTATIVA = 300; // quantos casos passados usa pra achar o "melhor terminal agora"
+const REFORCO_CUSUM_K = 0.03;
+const REFORCO_CUSUM_H = 1.5;
+
+let reforcoCusumS = 0;
+let ultimoTerminalRepetido = {}; // {terminal: ultimoNumero} pra detectar repeticao com numero diferente
+let reforcoContagemRegressiva = 0; // >0 = reforco ativo agora, decrementa a cada giro
+let reforcoTerminalAlvo = null; // qual terminal esta sendo reforcado nessa ativacao
+let reforcoPendentes = []; // janelas abertas aguardando os 12 giros pra alimentar o log adaptativo
+let reforcoLogAdaptativo = []; // {terminal, apareceu} dos ultimos casos, por terminal, pra achar o melhor
+
+function melhorTerminalReforcoAgora(){
+    if(reforcoLogAdaptativo.length < 50) return 0; // aquecimento minimo - usa T0 por padrao
+    const janela = reforcoLogAdaptativo.slice(-REFORCO_JANELA_ADAPTATIVA);
+    const taxas = [0,1,2,3,4,5,6,7,8,9].map(t=>{
+        const doTerminal = janela.filter(r=>r.terminal===t);
+        return {t, taxa: doTerminal.length>0 ? doTerminal.filter(r=>r.apareceu).length/doTerminal.length : 0};
+    });
+    return taxas.reduce((a,b)=>b.taxa>a.taxa?b:a).t;
+}
+
+function atualizarReforcoAdaptativo(novoNumero){
+    const t = terminalDig(novoNumero);
+
+    // 1) Resolve as janelas pendentes (alimenta o log adaptativo com o que realmente aconteceu)
+    reforcoPendentes = reforcoPendentes.filter(p=>{
+        p.vistos.push(t);
+        p.restam--;
+        if(p.restam===0){
+            for(let tt=0; tt<10; tt++){
+                reforcoLogAdaptativo.push({terminal:tt, apareceu: p.vistos.includes(tt)});
+            }
+            if(reforcoLogAdaptativo.length > REFORCO_JANELA_ADAPTATIVA*15) reforcoLogAdaptativo = reforcoLogAdaptativo.slice(-REFORCO_JANELA_ADAPTATIVA*15);
+            return false;
+        }
+        return true;
+    });
+
+    // 2) Se o reforco ativo ja "deu green" (terminal alvo apareceu), para a contagem aqui
+    if(reforcoContagemRegressiva > 0 && t === reforcoTerminalAlvo){
+        reforcoContagemRegressiva = 0;
+    }
+
+    // 3) Detecta repeticao de terminal (numero diferente) - abre uma nova janela pra
+    // alimentar o log adaptativo, E atualiza o CUSUM da frequencia desse evento
+    const repetiu = ultimoTerminalRepetido[t] !== undefined && ultimoTerminalRepetido[t] !== novoNumero;
+    if(repetiu){
+        reforcoPendentes.push({restam: REFORCO_JANELA_TERMINAL, vistos: []});
+    }
+    ultimoTerminalRepetido[t] = novoNumero;
+
+    // CUSUM sobre a frequencia real do evento "terminal repete" (baseline ~72.6%)
+    const BASELINE_REPETICAO = 0.726;
+    reforcoCusumS = Math.max(0, reforcoCusumS + (repetiu?1:0) - BASELINE_REPETICAO - REFORCO_CUSUM_K);
+    if(reforcoCusumS >= REFORCO_CUSUM_H){
+        reforcoTerminalAlvo = melhorTerminalReforcoAgora();
+        reforcoContagemRegressiva = REFORCO_JANELA_TERMINAL;
+        reforcoCusumS = 0;
+    }
+
+    if(reforcoContagemRegressiva > 0) reforcoContagemRegressiva--;
+}
+
+function atualizarCusumSetor(novoNumero){
+    setorQuenteAgora = null;
+    for(const nome in SETORES_CUSUM){
+        const pertence = SETORES_CUSUM[nome].has(novoNumero) ? 1 : 0;
+        setorCusumS[nome] = Math.max(0, setorCusumS[nome] + pertence - BASELINE_SETOR[nome] - SETOR_CUSUM_K);
+        if(setorCusumS[nome] >= SETOR_CUSUM_H){
+            setorQuenteAgora = nome;
+            setorCusumS[nome] = 0;
+        }
+    }
+}
+
+// Retorna true se NENHUM numero do array pertence ao setor que acabou de disparar
+// (ou seja, o array ja evita naturalmente o setor "quente" - reforça confiança)
+function evitaSetorQuente(numeros){
+    if(!setorQuenteAgora || !numeros || numeros.length===0) return false;
+    const setorQuente = SETORES_CUSUM[setorQuenteAgora];
+    return numeros.every(n => !setorQuente.has(n));
+}
+
 function renderSniperUnico(sniper){
 const div=document.getElementById('sniperNumeros');
 div.innerHTML='';
+const divReforco = document.getElementById('sniperReforcoSetor');
 if(sniper.numeros.length===0){
     let motivo;
     if(sniper.bloqueado) motivo = `🚫 Bloqueado: ${sniper.motivoBloqueio}`;
     else motivo = sniper.ativos.length<2 ? `Só ${sniper.ativos.length} de 3 ativo(s)` : 'Convergência vazia';
     div.innerHTML=`<div class="no-signal">${motivo}</div>`;
+    if(divReforco) divReforco.innerHTML = '';
     return;
 }
 sniper.numeros.forEach(n=>{
@@ -3249,6 +3673,17 @@ ball.className=`sniper-ball sb-${getCor(n)}`;
 ball.textContent=n;
 div.appendChild(ball);
 });
+
+// [NOVO] Reforço CUSUM de Setor - se o Sniper já evita naturalmente o setor que acabou de
+// disparar como "quente" (validado: outros 2 setores saem mais depois disso), mostra aviso
+// de reforço. Não muda a call do Sniper, só informa que ela está alinhada com esse sinal.
+if(divReforco){
+    if(setorQuenteAgora && evitaSetorQuente(sniper.numeros)){
+        divReforco.innerHTML = `<div style="font-size:9px;color:var(--jade);margin-top:4px">✅ Reforço: evita setor ${setorQuenteAgora} (quente agora) - validado, ~69% de acerto quando isso acontece</div>`;
+    } else {
+        divReforco.innerHTML = '';
+    }
+}
 }
 
 // [NOVO] Compara o call de um motor contra os grupos dominantes da diagonal.
@@ -3373,6 +3808,17 @@ html+=`<div class="drift-result">Par C: ${trend.parCol.join('+')}${discordaCol?A
 }
 if(chave && (conflitaComChave('DZ',trend.parDuz)||conflitaComChave('Col',trend.parCol))){
 html+=`<div style="font-size:9px;color:var(--crimson);margin-top:3px">⚔️ Nº-Chave ${chave.numero} pede ${chave.label}, conflita aqui</div>`;
+}
+// [NOVO] Aviso DZ2 - validado em 3 janelas de tempo separadas, sem exceção (Míng T123):
+// quando o Trend tem 3+ acertos seguidos E o número que acabou de sair é da Dúzia 2, a
+// sequência boa tende a CONTINUAR mais que o esperado (todas as 3 janelas testadas deram
+// abaixo do baseline de quebra ~32-37%). É só um aviso - não muda a call, não trava nada.
+if(historicoTotal.length>=4){
+    const sequenciaBoa = trendSequenciaBoaAtual>=3;
+    const numeroAtual = historicoTotal[0];
+    if(sequenciaBoa && duzia(numeroAtual)===2){
+        html+=`<div style="font-size:10px;color:var(--jade);margin-top:3px;font-weight:600">✅ DZ2 saiu com sequência boa ativa - histórico sugere continuidade (validado, 3/3 janelas)</div>`;
+    }
 }
 // [NOVO] Selo compacto do Luo Shu - so aparece quando converge exatamente com a call do Trend.
 // Uma linha so, fonte pequena, mesmo estilo dos outros avisos - nao aumenta a altura do box.
@@ -3521,6 +3967,13 @@ const hitAlgum = (hitDZparaGestao===true) || (hitColParaGestao===true);
 tr.total++;
 if(hitAlgum) tr.acertos++;
 }
+}
+// [NOVO] Atualiza o contador de sequência boa (fora do "if(tr)" de cima, pra funcionar mesmo
+// se a janela B-Adaptativo ainda não tiver sido escolhida)
+if(hitDZparaGestao!==null || hitColParaGestao!==null){
+    const hitAlgumGiro = (hitDZparaGestao===true) || (hitColParaGestao===true);
+    if(hitAlgumGiro) trendSequenciaBoaAtual++;
+    else trendSequenciaBoaAtual = 0;
 }
 
 // [NOVO] Assertividade individual por candidato do Trend (A/B/C/D/E/F) - chave = letra base
@@ -3851,10 +4304,68 @@ function carregarEstado(){
     }
 }
 
+// ============================================================================
+// [NOVO] Desfazer Última Entrada - tira uma "foto" completa do estado ANTES de processar
+// cada novo giro, e restaura essa foto inteira se o usuário pedir pra desfazer. Isso evita
+// ter que reverter manualmente dezenas de contadores/logs/CUSUM um por um (arriscado e
+// fácil de esquecer algum) - a foto garante que a restauração é sempre 100% fiel.
+// ============================================================================
+let snapshotAntesDoGiro = null;
+
+function tirarSnapshotEstado(){
+    return JSON.parse(JSON.stringify({
+        historicoTotal, totalGirosProcessados, historicoArquivoPermanente,
+        trendCallLog, sniperCallLog, chavePromissoraCallLog, diagIntermCallLog,
+        trendColPredictions, trendDuzPredictions, sniperPredictions, chavePromissoraPredictions, diagIntermPredictions,
+        quebraLog, quebrasPendentes, quebrasEsteGiro, ultimaQuebraPorTipo,
+        ewmaTerminais, terminalRadarCallLog, mlTerminalCallLog, estruturalCallLog,
+        residualPosicaoLog, residualPendente, residualCallLog, residualPredictions,
+        torneioCallLog, torneioPredictions,
+        trendStreakErro, trendSequenciaBoaAtual, trendPausaAte,
+        setorCusumS, setorQuenteAgora,
+        reforcoCusumS, ultimoTerminalRepetido, reforcoContagemRegressiva, reforcoTerminalAlvo, reforcoPendentes, reforcoLogAdaptativo,
+        termometroPendentes, termometroLog,
+        lastTrendSignal, lastOndasAtivas
+    }));
+}
+
+function restaurarSnapshotEstado(snap){
+    historicoTotal=snap.historicoTotal; totalGirosProcessados=snap.totalGirosProcessados; historicoArquivoPermanente=snap.historicoArquivoPermanente;
+    trendCallLog=snap.trendCallLog; sniperCallLog=snap.sniperCallLog; chavePromissoraCallLog=snap.chavePromissoraCallLog; diagIntermCallLog=snap.diagIntermCallLog;
+    trendColPredictions=snap.trendColPredictions; trendDuzPredictions=snap.trendDuzPredictions; sniperPredictions=snap.sniperPredictions; chavePromissoraPredictions=snap.chavePromissoraPredictions; diagIntermPredictions=snap.diagIntermPredictions;
+    quebraLog=snap.quebraLog; quebrasPendentes=snap.quebrasPendentes; quebrasEsteGiro=snap.quebrasEsteGiro; ultimaQuebraPorTipo=snap.ultimaQuebraPorTipo;
+    ewmaTerminais=snap.ewmaTerminais; terminalRadarCallLog=snap.terminalRadarCallLog; mlTerminalCallLog=snap.mlTerminalCallLog; estruturalCallLog=snap.estruturalCallLog;
+    residualPosicaoLog=snap.residualPosicaoLog; residualPendente=snap.residualPendente; residualCallLog=snap.residualCallLog; residualPredictions=snap.residualPredictions;
+    torneioCallLog=snap.torneioCallLog; torneioPredictions=snap.torneioPredictions;
+    trendStreakErro=snap.trendStreakErro; trendSequenciaBoaAtual=snap.trendSequenciaBoaAtual; trendPausaAte=snap.trendPausaAte;
+    setorCusumS=snap.setorCusumS; setorQuenteAgora=snap.setorQuenteAgora;
+    reforcoCusumS=snap.reforcoCusumS; ultimoTerminalRepetido=snap.ultimoTerminalRepetido; reforcoContagemRegressiva=snap.reforcoContagemRegressiva; reforcoTerminalAlvo=snap.reforcoTerminalAlvo; reforcoPendentes=snap.reforcoPendentes; reforcoLogAdaptativo=snap.reforcoLogAdaptativo;
+    termometroPendentes=snap.termometroPendentes; termometroLog=snap.termometroLog;
+    lastTrendSignal=snap.lastTrendSignal; lastOndasAtivas=snap.lastOndasAtivas;
+    salvarArquivoPermanente();
+}
+
+function desfazerUltimaEntrada(){
+    if(!snapshotAntesDoGiro){
+        alert('Nada pra desfazer - ou você já desfez a última ação, ou ainda não digitou nada nessa sessão.');
+        return;
+    }
+    const totalAntes = historicoTotal.length;
+    restaurarSnapshotEstado(snapshotAntesDoGiro);
+    const totalDepois = historicoTotal.length;
+    snapshotAntesDoGiro = null; // só permite desfazer 1 nível - evita desfazer em cascata por engano
+    renderMatriz();
+    executarConciliador();
+    atualizarStats();
+    atualizarUIChaveNumeros();
+    alert('Desfeito: '+(totalAntes-totalDepois)+' giro(s) removido(s). Voltou pro estado de antes.');
+}
+
 function adicionarSorteio(){
 const input=document.getElementById('novoSorteio');
 const val=parseInt(input.value);
 if(isNaN(val)||val<0||val>36){alert('Número inválido (0-36)');return;}
+snapshotAntesDoGiro = tirarSnapshotEstado();
 verificarCallAnterior(val);
 detectarQuebras(val);
 historicoTotal.unshift(val);
@@ -3876,13 +4387,44 @@ if(girosDesdeUltimaAnalise >= TERMOMETRO_CADENCIA){
 salvarEstado();
 }
 
+// [NOVO] Detecta sobreposição entre o final do arquivo permanente e o início de um novo
+// lote - mesma lógica do find_overlap() que já existe no gerenciar_dataset.py (Python),
+// agora trazida pro app ao vivo. Evita duplicar giros no arquivo permanente quando o
+// usuário cola um lote que se sobrepõe (parcial ou totalmente) com o que já foi carregado
+// antes - isso já causou um bug real (sucessores históricos aparecendo repetidos de forma
+// impossível estatisticamente).
+function encontrarOverlapArquivoPermanente(novoLote, minlen){
+    minlen = minlen || 8;
+    const existente = historicoArquivoPermanente.map(x=>x.n);
+    const maxL = Math.min(existente.length, novoLote.length);
+    for(let L=maxL; L>=minlen; L--){
+        const fimExistente = existente.slice(existente.length-L);
+        const inicioNovo = novoLote.slice(0,L);
+        let bate = true;
+        for(let k=0;k<L;k++){
+            if(fimExistente[k]!==inicioNovo[k]){ bate=false; break; }
+        }
+        if(bate) return L;
+    }
+    return 0;
+}
+
 function carregarLote(){
 const input=document.getElementById('loteSorteio');
 const vals=input.value.split(/[,\s;]+/).map(s=>parseInt(s.trim())).filter(n=>!isNaN(n)&&n>=0&&n<=36);
 if(vals.length===0){alert('Nenhum número válido');return;}
+snapshotAntesDoGiro = tirarSnapshotEstado(); // permite desfazer o LOTE inteiro de uma vez
 // [NOVO] Marca se o jogo estava zerado ANTES desse carregamento - só nesse caso aplica o corte
 // pros ultimos 10 no final. Se já havia histórico, o lote só soma normal (nada é cortado).
 const eraInicioDoJogo = historicoTotal.length===0;
+// [CORRIGIDO] vals[] vem do mais recente (vals[0]) pro mais antigo (vals[ultimo]) - mesma
+// ordem que historicoTotal usa. O arquivo permanente e' o oposto (mais antigo primeiro,
+// .push() no final = mais recente). Por isso precisa inverter vals antes de comparar.
+const valsCronologico = vals.slice().reverse(); // agora: mais antigo primeiro, igual o arquivo
+const overlapL = encontrarOverlapArquivoPermanente(valsCronologico);
+if(overlapL>0){
+    console.log(`⚠️ Overlap detectado com o arquivo permanente: ${overlapL} giros do início do lote já existiam - não serão duplicados no arquivo (mas entram normal na sessão).`);
+}
 // [CORRIGIDO] Bug sério: antes, verificarCallAnterior() rodava a cada número do lote, mas
 // executarConciliador() (que recalcula TODOS os sinais - T Míng, Trend, Sniper, Luo Shu,
 // Binários) só rodava 1 vez no final do lote inteiro. Isso significava que só o 1º número do
@@ -3894,7 +4436,7 @@ if(historicoTotal.length>0)verificarCallAnterior(vals[i]);
 detectarQuebras(vals[i]);
 historicoTotal.unshift(vals[i]);
 totalGirosProcessados++;
-registrarNoArquivoPermanente(vals[i]);
+if(i<vals.length-overlapL) registrarNoArquivoPermanente(vals[i]);
 if(historicoTotal.length>MAX_HISTORICO)historicoTotal=historicoTotal.slice(0,MAX_HISTORICO);
 executarConciliador();
 }
@@ -4007,6 +4549,21 @@ html+='</table>';
 return html;
 }
 
+// [NOVO] Tabela do Terminal Radar pro relatório - estrutura diferente das outras (vencedor,
+// pacote, indicador), então não reusa tabelaLog(). Inclui o estado do reforço adaptativo
+// (ativo/terminal-alvo) em cada linha, pra facilitar auditar se o pacote mostrado bate com
+// o que realmente foi conferido - foi assim que o Ricardo achou o vazamento do reforço antes.
+function tabelaTerminalRadar(log){
+if(log.length===0) return '<p style="color:#666;font-size:11px">Sem calls registradas</p>';
+let html='<table class="report-table"><tr><th>Vencedor</th><th>Pacote</th><th>Indicador</th><th>Real</th><th>Resultado</th></tr>';
+for(let i=log.length-1;i>=Math.max(0,log.length-30);i--){
+const c=log[i];
+html+='<tr><td>'+c.vencedor+'</td><td>'+c.pacote.map(t=>'T'+t).join('+')+'</td><td>'+(c.indicador||'')+'</td><td>'+c.real+'</td><td class="'+(c.acerto?'hit':'miss')+'">'+(c.acerto?'ACERTO':'ERRO')+'</td></tr>';
+}
+html+='</table>';
+return html;
+}
+
 // [NOVO] Verificacao da Zona em Observacao (0,5,7+Vizinhos de Zero) - marca hit/miss no
 // sucessor de cada quebra de NUMERO, e calcula o gap (em nº de quebras) desde o ultimo hit,
 // para conferir visualmente se existe algum padrao de espacamento (ex: gaps crescentes).
@@ -4044,14 +4601,13 @@ const modal=document.getElementById('modalRelatorio');
 modal.classList.add('active');
 const content=document.getElementById('relatorioContent');
 let html='';
-html+='<h3 style="color:#3a9683;margin:10px 0 5px">1. Míng T123</h3>'+tabelaLog(t123CallLog,['De','Para','Call','Resultado']);
-html+='<h3 style="color:#3a9683;margin:15px 0 5px">1b. Anti-Míng</h3>'+tabelaLog(antiMingCallLog,['De','Para','Call','Resultado']);
-html+='<h3 style="color:#3a9683;margin:15px 0 5px">2. Trend Detector</h3>'+tabelaLog(trendCallLog,['De','Para','Tipo','Call','Resultado']);
-html+='<h3 style="color:#c9a961;margin:15px 0 5px">🎯 Sniper (Convergência)</h3>'+tabelaLog(sniperCallLog,['De','Para','Call','Resultado']);
-html+='<h3 style="color:#c9a961;margin:15px 0 5px">5. Quebras de Atraso</h3>'+tabelaQuebras(quebraLog);
-html+='<h3 style="color:#c9a961;margin:15px 0 5px">6. Verificação de Zona (0,5,7 + Vizinhos de Zero)</h3>'+tabelaVerificacaoZona(quebraLog);
-html+='<h3 style="color:#c9a961;margin:15px 0 5px">7. Diagonal - Ciclo/Intermitência</h3>'+tabelaLog(diagIntermCallLog,['De','Para','Call','Resultado']);
-html+='<h3 style="color:#c9a961;margin:15px 0 5px">8. Trigger</h3>'+tabelaLog(chavePromissoraCallLog,['De','Para','Call','Resultado']);
+// [REDUZIDO] Só as 4 seções pedidas - Trend, Sniper, Trigger, Terminal Radar. As outras
+// (Míng T123, Anti-Míng, Quebras de Atraso, Verificação de Zona, Diagonal-Ciclo) continuam
+// rodando e acumulando dado normalmente por baixo, só não aparecem mais no relatório.
+html+='<h3 style="color:#3a9683;margin:10px 0 5px">1. Trend Detector</h3>'+tabelaLog(trendCallLog,['De','Para','Tipo','Call','Resultado']);
+html+='<h3 style="color:#c9a961;margin:15px 0 5px">2. Sniper (Convergência)</h3>'+tabelaLog(sniperCallLog,['De','Para','Call','Resultado']);
+html+='<h3 style="color:#c9a961;margin:15px 0 5px">3. Trigger</h3>'+tabelaLog(chavePromissoraCallLog,['De','Para','Call','Resultado']);
+html+='<h3 style="color:#3a9683;margin:15px 0 5px">4. Terminal Radar (Torneio)</h3>'+tabelaTerminalRadar(torneioCallLog);
 content.innerHTML=html;
 }
 function fecharRelatorio(){document.getElementById('modalRelatorio').classList.remove('active');}
@@ -4288,6 +4844,52 @@ function atualizarPainelOndas(){
     let html = '';
     const novasAtivas = [];
 
+    // [NOVO] Onda de "repetição de repetição" - quando a janela recente (150 giros) já
+    // acumulou 4+ pares imediatos (número saindo 2x seguido), a chance de UM desses números
+    // repetir de novo (virar 3x+) fica bem acima do esperado pela matemática pura de
+    // combinação (tipo "problema do aniversário"). Validado: 55,8% vs 29,7% esperado,
+    // p=0,0004, confirmado em 2 metades de tempo separadas (66,7% e 50,0%, ambas acima).
+    const JANELA_ONDA_REPETICAO = 150;
+    if(historicoTotal.length >= JANELA_ONDA_REPETICAO){
+        const janelaRecente = historicoTotal.slice(0, JANELA_ONDA_REPETICAO);
+        const posicoesPares = [];
+        for(let i=0;i<janelaRecente.length-1;i++){
+            if(janelaRecente[i]===janelaRecente[i+1]) posicoesPares.push(janelaRecente[i]);
+        }
+        const K = posicoesPares.length;
+        if(K>=4){
+            const contagem = {};
+            posicoesPares.forEach(n=>contagem[n]=(contagem[n]||0)+1);
+            const numerosQueJaRepetiram = Object.keys(contagem).filter(n=>contagem[n]>=2);
+            const jaTeveRepeticaoDeRepeticao = numerosQueJaRepetiram.length>0;
+            if(!jaTeveRepeticaoDeRepeticao){
+                html += `<div class="onda-ativa">🌊 Repetição de Repetição: ${K} pares imediatos nos últimos ${JANELA_ONDA_REPETICAO} giros — chance elevada de algum número repetir de novo (validado: ~56% vs ~30% esperado)</div>`;
+            } else {
+                html += `<div class="onda-ativa">🌊 Repetição de Repetição: JÁ CONFIRMADA — número(s) ${numerosQueJaRepetiram.join(', ')} repetiram 2+ vezes nos últimos ${JANELA_ONDA_REPETICAO} giros (${K} pares no total)</div>`;
+            }
+        }
+    }
+
+    // [NOVO] Onda "Zero na Coluna" - quando o 0 sai numa posição da matriz (a cada 10 giros),
+    // o próprio 0 (número exato, não terminal genérico) tem chance elevada de reaparecer na
+    // MESMA posição de coluna, 70 giros depois (7 posições na sequência de coluna). Validado:
+    // 8,7% e 5,4% nas 2 metades do histórico (esperado 2,7%) - achado ESPECÍFICO do número 0,
+    // não generaliza pra família T0, Voisins ou Paridade (todos testados e descartados).
+    const LARGURA_COLUNA = 10;
+    const DESLOC_ZERO_COLUNA = 7;
+    if(historicoTotal.length >= LARGURA_COLUNA*(DESLOC_ZERO_COLUNA+1)){
+        // reconstroi a sequencia de coluna da posicao correspondente ao giro ATUAL
+        const posAtualNaLinha = totalGirosProcessados % LARGURA_COLUNA;
+        const seqColunaAtual = [];
+        for(let i=posAtualNaLinha; i<historicoTotal.length; i+=LARGURA_COLUNA){
+            seqColunaAtual.push(historicoTotal[i]);
+        }
+        // seqColunaAtual[0] = giro atual, seqColunaAtual[DESLOC_ZERO_COLUNA] = 70 giros atras
+        if(seqColunaAtual.length > DESLOC_ZERO_COLUNA && seqColunaAtual[DESLOC_ZERO_COLUNA]===0){
+            html += `<div class="onda-ativa">🎯 Zero na Coluna: o 0 saiu há exatamente 70 giros nessa mesma posição de coluna — chance elevada dele repetir agora (validado: ~5-9% vs 2,7% esperado)</div>`;
+        }
+    }
+
     // [NOVO] Hipótese A do Top of the Pop - frequência de base das 6 categorias DZ/Col.
     // Reaproveita o mesmo candidato G do Trend, só pra exibição no painel (não recalcula).
     const gFreq = trendCandidatoG_FreqBase(historicoTotal);
@@ -4341,7 +4943,8 @@ function atualizarPainelOndas(){
     div.innerHTML = html || '<div class="no-signal">Sem onda ativa no momento</div>';
 }
 
-// [NOVO] Exportacao CSV - junta todos os logs num unico arquivo, com coluna "Fonte"
+// [NOVO] Exportacao CSV - junta os logs num unico arquivo, com coluna "Fonte"
+// [REDUZIDO] Só as 4 fontes do relatório - Trend, Sniper, Trigger, Terminal Radar.
 function exportarCSV(){
 const linhas=[['Fonte','De','Para','Tipo/Valor','Call','Resultado']];
 const adicionar=(fonte, log)=>{
@@ -4349,15 +4952,11 @@ log.forEach(c=>{
 linhas.push([fonte, c.de, c.para, c.tipo||'', c.call, c.acerto?'ACERTO':'ERRO']);
 });
 };
-adicionar('Míng T123', t123CallLog);
-adicionar('Anti-Míng', antiMingCallLog);
 adicionar('Trend', trendCallLog);
 adicionar('Sniper', sniperCallLog);
-adicionar('Diagonal-Ciclo', diagIntermCallLog);
 adicionar('Trigger', chavePromissoraCallLog);
-quebraLog.forEach(q=>{
-const hit = q.tipo==='Número' ? ZONA_OBSERVACAO.includes(parseInt(q.proximoNumero)) : '';
-linhas.push(['Quebra de Atraso', '', q.proximoNumero, q.tipo+' '+q.valor, q.atraso+' giros', hit===''?'':(hit?'HIT ZONA':'')]);
+torneioCallLog.forEach(c=>{
+linhas.push(['Terminal Radar', c.vencedor, c.pacote.map(t=>'T'+t).join('+'), c.indicador||'', c.real, c.acerto?'ACERTO':'ERRO']);
 });
 
 const csv = linhas.map(l=>l.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -4382,6 +4981,16 @@ t123Predictions={total:0,acertos:0};
 trendColPredictions={total:0,acertos:0};
 trendDuzPredictions={total:0,acertos:0};
 sniperPredictions={total:0,acertos:0};
+setorCusumS = {Voisins:0, Tiers:0, Orphelins:0};
+reforcoCusumS = 0;
+ultimoTerminalRepetido = {};
+reforcoContagemRegressiva = 0;
+reforcoTerminalAlvo = null;
+reforcoPendentes = [];
+reforcoLogAdaptativo = [];
+setorQuenteAgora = null;
+termometroPendentes = [];
+termometroLog = [];
 diagIntermPredictions = {total:0, acertos:0};
 diagIntermCallLog = [];
 lastDiagIntermSignal = null;
@@ -4393,6 +5002,7 @@ lastTriggerSignal = null;
 chaveCusumFrio = 0;
 chaveMotorAtivo = true;
 trendStreakErro = {DZ:0, Col:0};
+trendSequenciaBoaAtual = 0;
 trendPausaAte = {DZ:0, Col:0};
 ultimaQuebraPorTipo = {};
 persistenciaParDZ = {par:null, giros:0};
@@ -4408,6 +5018,10 @@ mlTerminalPredictions = {total:0, acertos:0};
 estruturalCallLog = [];
 estruturalPredictions = {total:0, acertos:0};
 ultimoTerminalAposQuebra = {};
+residualPosicaoLog = [];
+residualPendente = null;
+residualCallLog = [];
+residualPredictions = {total:0, acertos:0};
 numeroQuebrouGiroAnterior = null;
 quebraPendente = null;
 quebraCallLog = [];
@@ -4466,6 +5080,20 @@ document.getElementById('ondasContent').innerHTML='<div class="no-signal">Aguard
 document.getElementById('compactoUltimos').innerHTML='';
 document.getElementById('compactoQuebraAlerta').innerHTML='';
 document.getElementById('compactoLinhas').innerHTML='<div class="empty-msg" style="padding:8px">Aguardando dados...</div>';
+
+// [NOVO] Sucessores Historicos tambem so eh redesenhado dentro de executarConciliador() -
+// mesmo tipo de bug do Modo Compacto e do Terminal Radar antes. Como esse painel le do
+// arquivo permanente (que NAO reseta de proposito), a tela ficava mostrando os sucessores
+// do numero antigo ate o proximo giro chegar, mesmo depois do historico da sessao zerar.
+document.getElementById('sucessoresHistoricos').innerHTML='<div class="empty-msg" style="font-size:10px">Aguardando dados...</div>';
+
+// [NOVO] O Modo Compacto tem suas PRÓPRIAS cópias de Ondas e Sucessores (compactoOndas,
+// compactoSucessores) - mesmo bug de sempre, só são redesenhadas dentro de
+// executarConciliador/renderModoCompacto, então precisam ser limpas aqui manualmente também.
+const divCompOndas = document.getElementById('compactoOndas');
+if(divCompOndas) divCompOndas.innerHTML = '';
+const divCompSucessores = document.getElementById('compactoSucessores');
+if(divCompSucessores) divCompSucessores.innerHTML = '';
 
 document.getElementById('statusDot').className='status-dot bg-sta';
 document.getElementById('statusText').textContent='AGUARDANDO DADOS';
