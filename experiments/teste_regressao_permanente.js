@@ -93,8 +93,21 @@ function __processarGiro(n){
   executarConciliador();
 }
 
+// [NOVO] Sem isso, modeloEstrutural fica null pra sempre e o candidato Estrutural nunca
+// entra em jogo (estruturalCallLog ficaria vazio, sem cobertura nenhuma nesse teste).
+// Mesma metodologia do experiments/teste_fix_vazamento_torneio.js: warmup + retreino por fold.
+const N_FOLDS = 15;
+const WARMUP = 1000;
+const foldSize = Math.floor((__dataset.length - WARMUP) / N_FOLDS);
+
 let __erros = 0, __idx = 0;
 try {
+  for (; __idx < WARMUP && __idx < __dataset.length; __idx++) __processarGiro(__dataset[__idx]);
+  for (let f = 1; f <= N_FOLDS; f++) {
+    retreinarModeloEstrutural();
+    const fimFold = Math.min(__dataset.length, WARMUP + f * foldSize);
+    for (; __idx < fimFold; __idx++) __processarGiro(__dataset[__idx]);
+  }
   for (; __idx < __dataset.length; __idx++) __processarGiro(__dataset[__idx]);
 } catch(e) {
   __erros++;
